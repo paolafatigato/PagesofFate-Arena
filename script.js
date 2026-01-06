@@ -9,13 +9,12 @@ const GAME_CONFIG = {
 
 const CARD_DATABASE = GREEK_MYTHOLOGY_CARDS;
 
-
-// FIX PATH IMMAGINI per GitHub Pages
 CARD_DATABASE.forEach(card => {
   if (card.imageUrl?.startsWith('/img/')) {
     card.imageUrl = `/PagesofFate-Arena${card.imageUrl}`;
   }
 });
+
 
 // Game State
 let gameState = {
@@ -28,13 +27,6 @@ let gameState = {
   attackMode: null,
   abilityMode: null,
 };
-
-cards.forEach(card => {
-  if (card.imageUrl?.startsWith('/img/')) {
-    card.imageUrl = `/PagesofFate-Arena${card.imageUrl}`;
-  }
-});
-
 
 // Game Functions
 function shuffleDeck(cards) {
@@ -633,5 +625,3 @@ function showCardDetail(card) {
 function closeModal() {
   document.getElementById('cardModal').classList.remove('active');
 }
-
-
