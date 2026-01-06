@@ -21,6 +21,13 @@ let gameState = {
   abilityMode: null,
 };
 
+cards.forEach(card => {
+  if (card.imageUrl?.startsWith('/img/')) {
+    card.imageUrl = `/PagesofFate-Arena${card.imageUrl}`;
+  }
+});
+
+
 // Game Functions
 function shuffleDeck(cards) {
   const shuffled = [...cards];
@@ -618,3 +625,4 @@ function showCardDetail(card) {
 function closeModal() {
   document.getElementById('cardModal').classList.remove('active');
 }
+
