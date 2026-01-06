@@ -9,6 +9,14 @@ const GAME_CONFIG = {
 
 const CARD_DATABASE = GREEK_MYTHOLOGY_CARDS;
 
+
+// FIX PATH IMMAGINI per GitHub Pages
+CARD_DATABASE.forEach(card => {
+  if (card.imageUrl?.startsWith('/img/')) {
+    card.imageUrl = `/PagesofFate-Arena${card.imageUrl}`;
+  }
+});
+
 // Game State
 let gameState = {
   matchCode: '',
@@ -625,4 +633,5 @@ function showCardDetail(card) {
 function closeModal() {
   document.getElementById('cardModal').classList.remove('active');
 }
+
 
