@@ -698,12 +698,46 @@
   // btn: optional action button shown next to the enlarged card (Redraw, Select…)
   function zoomCard(id, btn = '') {
     const c = BY_ID[id];
-    $('zoomBody').innerHTML = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
+    const n = zoomNav ? navItems().length : 0;
+    const nav = n > 1 ? `<button class="zoom-nav prev" data-zoomnav="-1" aria-label="Previous card">‹</button>
+      <button class="zoom-nav next" data-zoomnav="1" aria-label="Next card">›</button>
+      <div class="zoom-count">${zoomNav.idx + 1} / ${n}</div>` : '';
+    $('zoomBody').innerHTML = `${nav}<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
       ${btn}${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
     </div></div>`;
     $('zoom').hidden = false;
   }
-  function closeZoom() { $('zoom').hidden = true; $('zoomBody').innerHTML = ''; }
+  function closeZoom() { zoomNav = null; $('zoom').hidden = true; $('zoomBody').innerHTML = ''; }
+
+  // browsing the cards of a grid (or of the opening hand) one by one while enlarged
+  let zoomNav = null; // { container: CSS selector of the grid, idx }
+  const navItems = () => (zoomNav ? [...document.querySelectorAll(zoomNav.container + ' > .card')] : []);
+  function zoomInfo(el) {
+    if (el.dataset.pick !== undefined) return [el.dataset.id, selectButton('pick', el.dataset.pick)];
+    if (el.dataset.gravepick !== undefined) return [el.dataset.id, selectButton('grave', el.dataset.gravepick)];
+    if (el.dataset.uid) {
+      const pl = app.view.players[meIdx()];
+      return [pl.hand.find(h => h.uid === el.dataset.uid).id, pl.mulliganDone ? '' : redrawButton(el.dataset.uid)];
+    }
+    return [el.dataset.id || el.dataset.zoom, ''];
+  }
+  function zoomFromGrid(el, container) {
+    zoomNav = { container, idx: 0 };
+    zoomNav.idx = Math.max(0, navItems().indexOf(el));
+    showZoomNav();
+  }
+  function showZoomNav() {
+    const el = navItems()[zoomNav.idx];
+    if (!el) return closeZoom(); // the grid is gone (e.g. the choice is complete)
+    const [id, btn] = zoomInfo(el);
+    zoomCard(id, btn);
+  }
+  function stepZoom(d) {
+    const n = navItems().length;
+    if (n < 2) return;
+    zoomNav.idx = (zoomNav.idx + d + n) % n;
+    showZoomNav();
+  }
   function redrawButton(uid) {
     return app.ui.mulligan.has(uid)
       ? `<button class="btn" data-redraw="${uid}">✓ Keep this card</button>`
@@ -795,15 +829,20 @@
       if (rd) {
         const u = rd.dataset.redraw;
         if (app.ui.mulligan.has(u)) app.ui.mulligan.delete(u); else app.ui.mulligan.add(u);
-        closeZoom();
-        return render();
+        render();
+        return zoomNav ? showZoomNav() : closeZoom();
       }
       const sel = ev.target.closest('[data-select]');
       if (sel) {
         const [kind, u] = sel.dataset.select.split(':');
-        closeZoom();
-        return toggleSelect(kind, u);
+        const tg = app.ui.target, step = tg && tg.idx;
+        toggleSelect(kind, u);
+        // a completed discard-pile choice moves on to the next step: stop browsing
+        if (kind === 'grave' && (app.ui.target !== tg || !tg || tg.idx !== step)) return closeZoom();
+        return zoomNav ? showZoomNav() : closeZoom();
       }
+      const nv = ev.target.closest('[data-zoomnav]');
+      if (nv) return stepZoom(Number(nv.dataset.zoomnav));
       if (!ev.target.closest('.zoom-box') || ev.target.closest('[data-action="closeZoom"]')) closeZoom();
       return;
     }
@@ -816,8 +855,9 @@
     const ui = app.ui;
 
     if (el.dataset.react !== undefined) { closeModal(); $('modal').dataset.pending = ''; return dispatch({ type: 'react', index: Number(el.dataset.react) }); }
-    if (el.dataset.pick !== undefined) return zoomCard(el.dataset.id, selectButton('pick', el.dataset.pick));
-    if (el.dataset.gravepick !== undefined) return zoomCard(el.dataset.id, selectButton('grave', el.dataset.gravepick));
+    if ((el.dataset.pick !== undefined || el.dataset.gravepick !== undefined || el.dataset.zoom !== undefined) && el.closest('#modal .pick-grid')) {
+      return zoomFromGrid(el, '#modal .pick-grid');
+    }
     if (el.dataset.choice !== undefined) {
       const tg = ui.target; ui.target = null; closeModal();
       return tg.done({ t: tg.finalT, choice: Number(el.dataset.choice) });
@@ -877,7 +917,7 @@
     if (v.phase === 'mulligan' && where === 'hand') {
       const inst = v.players[meIdx()].hand.find(h => h.uid === uid);
       if (!inst) return;
-      return zoomCard(inst.id, v.players[meIdx()].mulliganDone ? '' : redrawButton(uid));
+      return zoomFromGrid(el, '#myHand');
     }
     if (ui.attack && where === 'field') {
       const targets = currentTargets();
@@ -893,7 +933,18 @@
     openCardDetail(uid, where);
   });
 
+  // swipe left / right on the enlarged card to browse
+  let swipeX = null;
+  $('zoom').addEventListener('touchstart', e => { swipeX = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+  $('zoom').addEventListener('touchend', e => {
+    if (swipeX === null || !zoomNav) return;
+    const dx = e.changedTouches[0].clientX - swipeX;
+    swipeX = null;
+    if (Math.abs(dx) > 60) stepZoom(dx < 0 ? 1 : -1);
+  });
+
   document.addEventListener('keydown', ev => {
+    if (!$('zoom').hidden && zoomNav && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) return stepZoom(ev.key === 'ArrowLeft' ? -1 : 1);
     if (ev.key === 'Escape') {
       if (!$('zoom').hidden) return closeZoom();
       if (!$('modal').hidden && $('modal').dataset.pending !== 'yes') closeModal();

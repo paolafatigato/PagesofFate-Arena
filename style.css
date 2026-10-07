@@ -352,3 +352,24 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   display: grid; place-items: center; font-weight: 700;
   background: var(--gold2); color: #24180a; box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
 }
+
+/* ---------------- enlarged card: arrows to browse the other cards */
+.zoom-nav {
+  position: fixed; top: 50%; transform: translateY(-50%); z-index: 3;
+  width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(20, 14, 9, .88); color: var(--gold2); border: 1px solid var(--gold);
+  font-size: 2em; line-height: 1; padding: 0 0 4px; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .5); transition: background .15s, color .15s;
+}
+.zoom-nav:hover { background: var(--gold); color: #24180a; }
+.zoom-nav.prev { left: max(12px, calc(50% - 430px - 64px)); }
+.zoom-nav.next { right: max(12px, calc(50% - 430px - 64px)); }
+.zoom-count {
+  text-align: center; margin: -6px 0 10px; color: var(--muted);
+  font-family: 'Cinzel', serif; font-size: .85em; letter-spacing: 1px;
+}
+@media (max-width: 640px) {
+  .zoom-nav { width: 40px; height: 40px; font-size: 1.7em; top: 40%; }
+  .zoom-nav.prev { left: 10px; }
+  .zoom-nav.next { right: 10px; }
+}
