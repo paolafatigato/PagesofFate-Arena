@@ -43,11 +43,12 @@
 
   function openModal(html) {
     $('modal').dataset.pending = '';
+    $('modal').dataset.hand = '';
     $('modal').querySelector('.modal-close').hidden = false;
     $('modalBody').innerHTML = html;
     $('modal').hidden = false;
   }
-  function closeModal() { $('modal').hidden = true; $('modalBody').innerHTML = ''; }
+  function closeModal() { $('modal').hidden = true; $('modal').dataset.hand = ''; $('modalBody').innerHTML = ''; }
 
   function showCover(title, text, buttons) {
     $('coverTitle').textContent = title;
@@ -130,7 +131,8 @@
     if (app.mode !== 'cpu' || app.aiTimer || !s || s.phase === 'over') return;
     if (E.actingPlayer(s) !== AI_PLAYER) return;
     const fresh = s.current === AI_PLAYER && app.aiTurn !== s.turn;
-    app.aiTimer = setTimeout(aiStep, s.pending ? 700 : fresh ? 1100 : 850);
+    const busy = Math.max(0, (app.fxBusyUntil || 0) - Date.now()); // let the last fight finish on screen
+    app.aiTimer = setTimeout(aiStep, (s.pending ? 700 : fresh ? 1100 : 850) + busy);
   }
 
   function aiStep() {
@@ -261,7 +263,7 @@
       if (el) el.classList.add('auto-attack');
       setTimeout(() => {
         dispatch({ type: 'attack', uid: A.uid, target: 'player' });
-        setTimeout(step, 750);
+        setTimeout(step, Math.max(750, (app.fxBusyUntil || 0) - Date.now() + 150));
       }, 500);
     };
     step();
@@ -326,13 +328,171 @@
     }, 2600);
   }
 
+  // ============================================================ battle: who attacks whom, and why cards die
+  const cardEl = uid => document.querySelector(`.field .card[data-uid="${uid}"]`);
+  const center = r => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+
+  // where every field card is now, so cards that are about to disappear can still be animated
+  function fieldRects() {
+    const out = {};
+    document.querySelectorAll('.field .card[data-uid]').forEach(el => { out[el.dataset.uid] = el.getBoundingClientRect(); });
+    return out;
+  }
+
+  function newEvents(v, rects, silent) {
+    const seq = v.fxSeq || 0;
+    if (app.fxSeen === null || app.fxSeen === undefined || seq < app.fxSeen) { // first view or a new game
+      app.fxSeen = seq;
+      $('battleReport').hidden = true;
+      return;
+    }
+    const list = (v.fx || []).filter(e => e.seq > app.fxSeen);
+    app.fxSeen = seq;
+    if (!list.length) return;
+    showReport(v, list);
+    if (!silent) playFx(list, rects);
+  }
+
+  // ---- the written report: what happened in the last move
+  function who(v, p, cap) {
+    if (p === meIdx() && app.mode !== 'local') return cap ? 'Your' : 'your';
+    return `${esc(v.players[p].name)}'s`;
+  }
+  const cname = (id, p) => `<b class="pc p${p}">${esc(BY_ID[id].name)}</b>`;
+  const def0 = d => Math.max(0, d);
+
+  function reportLines(v, list) {
+    const me = meIdx();
+    const lines = [];
+    const tips = new Set();
+    for (const e of list) {
+      if (e.k === 'fight') {
+        const A = cname(e.aId, e.aP), D = cname(e.dId, e.dP);
+        if (e.note) { lines.push({ cls: '', html: `⚔ ${A} attacked ${D}: ${esc(e.note)}.` }); continue; }
+        let t = `⚔ ${who(v, e.aP, true)} ${A} <span class="num">ATK ${e.atkA}</span> attacked ${who(v, e.dP)} ${D}. `;
+        t += e.toD ? `${D} took <span class="num down">${e.toD}</span> damage (DEF ${e.defD[0]} → ${def0(e.defD[1])}). `
+          : `${D} took no damage. `;
+        t += e.toA ? `${D} hit back with <span class="num">ATK ${e.atkD}</span>: ${A} took <span class="num down">${e.toA}</span> (DEF ${e.defA[0]} → ${def0(e.defA[1])}).`
+          : `${A} took nothing back.`;
+        lines.push({ cls: '', html: t });
+        if (e.toA && e.defA[1] <= 0) tips.add('When a card attacks, it also takes damage equal to the ATK of the card it attacks.');
+        const printed = BY_ID[e.dId].def;
+        if (e.defD[0] < printed) tips.add(`Damage stays on a card: ${BY_ID[e.dId].name} had already lost DEF before this fight (printed DEF ${printed}).`);
+      } else if (e.k === 'sweep') {
+        lines.push({ cls: '', html: `⚔ ${who(v, e.aP, true)} ${cname(e.aId, e.aP)} hit every enemy card for <span class="num down">${e.dmg}</span> damage.` });
+      } else if (e.k === 'direct') {
+        lines.push({ cls: e.p === me ? 'bad' : '', html: `⚔ ${who(v, e.aP, true)} ${cname(e.aId, e.aP)} attacked ${e.p === me && app.mode !== 'local' ? 'you' : esc(v.players[e.p].name)} directly: <span class="num down">−${e.dmg}</span> life.` });
+      } else if (e.k === 'death') {
+        lines.push({ cls: e.p === me ? 'bad' : 'good', html: `💀 ${who(v, e.p, true)} ${cname(e.id, e.p)} was destroyed: ${esc(e.why)}.` });
+      }
+    }
+    tips.forEach(t => lines.push({ cls: 'tip', html: `ℹ ${esc(t)}` }));
+    return lines;
+  }
+
+  function showReport(v, list) {
+    const lines = reportLines(v, list);
+    if (!lines.length) return;
+    $('battleReport').innerHTML = `<button class="br-close" data-action="closeReport" aria-label="Close">×</button>
+      <div class="br-title">What happened</div>
+      <ul>${lines.map(l => `<li class="${l.cls}">${l.html}</li>`).join('')}</ul>`;
+    $('battleReport').hidden = false;
+  }
+
+  // ---- the animations on the board
+  function makeGhost(id, r) {
+    const g = document.createElement('div');
+    g.className = 'fx-ghost';
+    Object.assign(g.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    g.innerHTML = `<img src="${BY_ID[id].image}" alt="">`;
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function floatAt(r, text, cls) {
+    const f = document.createElement('div');
+    f.className = 'dmg-float card-dmg ' + (cls || '');
+    f.textContent = text;
+    const c = center(r);
+    f.style.left = c.x + 'px';
+    f.style.top = c.y + 'px';
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), 1400);
+  }
+
+  function arrow(ra, rb) {
+    const a = center(ra), b = center(rb);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'fx-arrow');
+    svg.innerHTML = `<defs><marker id="fxHead" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#ff5a44"/></marker></defs>
+      <line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" marker-end="url(#fxHead)"/>`;
+    document.body.appendChild(svg);
+    setTimeout(() => svg.remove(), 950);
+  }
+
+  function lunge(el, toRect) {
+    const ra = el.getBoundingClientRect();
+    const a = center(ra), b = center(toRect);
+    el.style.setProperty('--dx', (b.x - a.x) * 0.35 + 'px');
+    el.style.setProperty('--dy', (b.y - a.y) * 0.35 + 'px');
+    el.classList.remove('fx-lunge');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('fx-lunge');
+    setTimeout(() => el.classList.remove('fx-lunge'), 650);
+  }
+
+  function hitFx(A, D, toD, toA) {
+    if (!A || !D) return;
+    const ra = A.getBoundingClientRect(), rd = D.getBoundingClientRect();
+    arrow(ra, rd);
+    lunge(A, rd);
+    setTimeout(() => {
+      D.classList.add('fx-struck');
+      setTimeout(() => D.classList.remove('fx-struck'), 500);
+      floatAt(rd, toD ? `−${toD}` : '0', toD ? '' : 'none');
+      if (toA) {
+        A.classList.add('fx-struck');
+        setTimeout(() => A.classList.remove('fx-struck'), 500);
+        floatAt(ra, `−${toA}`, 'counter');
+      }
+    }, 280);
+  }
+
+  function playFx(list, rects) {
+    const ghosts = {};
+    const deaths = list.filter(e => e.k === 'death');
+    // destroyed cards are already gone from the board: keep a copy where they were until they die on screen
+    deaths.forEach(e => { if (!cardEl(e.uid) && rects[e.uid]) ghosts[e.uid] = makeGhost(e.id, rects[e.uid]); });
+    const el = uid => cardEl(uid) || ghosts[uid] || null;
+    let t = 0;
+    for (const e of list) {
+      if (e.k === 'fight') { setTimeout(() => hitFx(el(e.a), el(e.d), e.toD, e.toA), t); t += 950; }
+      else if (e.k === 'sweep') { setTimeout(() => e.targets.forEach(u => hitFx(el(e.a), el(u), e.dmg, 0)), t); t += 950; }
+      else if (e.k === 'direct') {
+        setTimeout(() => {
+          const A = el(e.a);
+          const chip = $(e.p === meIdx() ? 'myBar' : 'oppBar').querySelector('.stat-chip.life');
+          if (A && chip) { arrow(A.getBoundingClientRect(), chip.getBoundingClientRect()); lunge(A, chip.getBoundingClientRect()); }
+        }, t);
+        t += 700;
+      }
+    }
+    setTimeout(() => deaths.forEach(e => { if (ghosts[e.uid]) ghosts[e.uid].classList.add('fx-die'); }), t);
+    if (deaths.length) t += 1100;
+    setTimeout(() => Object.values(ghosts).forEach(g => g.remove()), t + 200);
+    app.fxBusyUntil = Date.now() + t;
+  }
+
   function setView(v, silent) {
     const prev = app.view;
+    const rects = fieldRects();
     app.view = v;
     handLosses(prev, v).forEach(showShatter);
     app.ui.target = null;
     app.ui.attack = null;
     if (!silent) render();
+    newEvents(v, rects, silent);
   }
 
   // ============================================================ lobby & network
@@ -409,7 +569,8 @@
     clearTimeout(app.aiTimer); app.aiTimer = null;
     try { if (app.conn) app.conn.close(); } catch (e) { /* ignore */ }
     try { if (app.peer) app.peer.destroy(); } catch (e) { /* ignore */ }
-    Object.assign(app, { mode: null, state: null, view: null, viewer: null, peer: null, conn: null, prevLife: null });
+    Object.assign(app, { mode: null, state: null, view: null, viewer: null, peer: null, conn: null, prevLife: null, fxSeen: null });
+    $('battleReport').hidden = true;
     $('lobbyChoices').hidden = false;
     $('lobbyWaiting').hidden = true;
     hideCover(); closeModal();
@@ -769,8 +930,13 @@
     if (!inst || inst.hidden) return;
     const c = BY_ID[inst.id];
     const mine = inst.ctrl === me || where === 'hand';
+    // cards in my hand: arrows (buttons, keyboard ← →, swipe) to browse the others
+    const hand = v.players[me].hand;
+    const nav = where === 'hand' && hand.length > 1 ? `<button class="zoom-nav prev" data-handnav="-1" aria-label="Previous card">‹</button>
+      <button class="zoom-nav next" data-handnav="1" aria-label="Next card">›</button>
+      <div class="zoom-count">${hand.indexOf(inst) + 1} / ${hand.length} · ← → browse your hand · Enter plays it</div>` : '';
     // the card image already prints name, type, source, description and ability text
-    let html = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">`;
+    let html = `${nav}<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">`;
 
     if (where === 'field') {
       const a = E.getAtk(v, inst), d = E.getDef(v, inst);
@@ -807,6 +973,14 @@
     }
     html += `</div></div>`;
     openModal(html);
+    if (where === 'hand') $('modal').dataset.hand = uid;
+  }
+
+  function stepHand(d) {
+    const hand = app.view.players[meIdx()].hand;
+    const k = hand.findIndex(h => h.uid === $('modal').dataset.hand);
+    if (hand.length < 2 || k < 0) return;
+    openCardDetail(hand[(k + d + hand.length) % hand.length].uid, 'hand');
   }
 
   function openGrave(p) {
@@ -1005,6 +1179,8 @@
       if (!ev.target.closest('.zoom-box') || ev.target.closest('[data-action="closeZoom"]')) closeZoom();
       return;
     }
+    const hn = ev.target.closest('[data-handnav]');
+    if (hn) return stepHand(Number(hn.dataset.handnav));
     const el = ev.target.closest('[data-action],[data-uid],[data-grave],[data-revealed],[data-react],[data-pick],[data-gravepick],[data-choice],[data-zoom],[data-gallery]');
     if (!el) {
       if (ev.target === $('modal') && $('modal').dataset.pending !== 'yes' && !app.ui.target) closeModal();
@@ -1049,6 +1225,7 @@
         case 'endTurn': return dispatch({ type: 'end' });
         case 'hint': return showHint();
         case 'attackAll': return attackAll();
+        case 'closeReport': $('battleReport').hidden = true; return;
         case 'mulligan': { const uids = [...ui.mulligan]; ui.mulligan = new Set(); return dispatch({ type: 'mulligan', uids }); }
         case 'play': return doPlay(el.dataset.uid);
         case 'ability': return doAbility(el.dataset.uid, el.dataset.ability);
@@ -1103,9 +1280,39 @@
     swipeX = null;
     if (Math.abs(dx) > 60) stepZoom(dx < 0 ? 1 : -1);
   });
+  // ...and on a card of my hand
+  let swipeHandX = null;
+  $('modal').addEventListener('touchstart', e => { swipeHandX = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+  $('modal').addEventListener('touchend', e => {
+    if (swipeHandX === null || !$('modal').dataset.hand) return;
+    const dx = e.changedTouches[0].clientX - swipeHandX;
+    swipeHandX = null;
+    if (Math.abs(dx) > 60) stepHand(dx < 0 ? 1 : -1);
+  });
+
+  const typing = () => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
 
   document.addEventListener('keydown', ev => {
     if (!$('zoom').hidden && zoomNav && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) return stepZoom(ev.key === 'ArrowLeft' ? -1 : 1);
+    const handOpen = !$('modal').hidden && $('modal').dataset.hand;
+    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+      const d = ev.key === 'ArrowLeft' ? -1 : 1;
+      if (handOpen) { ev.preventDefault(); return stepHand(d); }
+      // nothing open: the arrows start browsing my hand (from the first or the last card)
+      const v = app.view;
+      if ($('modal').hidden && $('zoom').hidden && $('cover').hidden && !typing() && $('game').classList.contains('active')
+        && v && v.phase === 'play' && !app.ui.target && !app.ui.attack) {
+        const hand = v.players[meIdx()].hand;
+        if (hand.length && !hand[0].hidden) { ev.preventDefault(); return openCardDetail(hand[d > 0 ? 0 : hand.length - 1].uid, 'hand'); }
+      }
+    }
+    // Enter plays the card being looked at
+    if (ev.key === 'Enter' && handOpen) {
+      const b = $('modal').querySelector('button[data-action="play"]:not([disabled])');
+      ev.preventDefault();
+      if (b) b.click();
+      return;
+    }
     if (ev.key === 'Escape') {
       if (!$('zoom').hidden) return closeZoom();
       if (!$('modal').hidden && $('modal').dataset.pending !== 'yes') closeModal();

@@ -449,3 +449,60 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
 @media (prefers-reduced-motion: reduce) {
   .shard.left, .shard.right, .smoke, .card.auto-attack { animation-duration: .01s; }
 }
+
+/* ---------------- battle: report of the last move */
+.battle-report {
+  position: relative; padding: 8px 34px 8px 12px; border-radius: var(--radius);
+  background: rgba(20, 16, 12, .85); border: 1px solid var(--line); border-left: 4px solid var(--red);
+  font-size: .9em; animation: shatterin .25s ease-out;
+}
+.battle-report[hidden] { display: none; }
+.br-title { font-family: 'Cinzel', serif; color: var(--gold2); font-weight: 700; font-size: .9em; margin-bottom: 4px; }
+.battle-report ul { list-style: none; margin: 0; padding: 0; }
+.battle-report li { padding: 3px 6px; border-radius: 5px; line-height: 1.45; }
+.battle-report li.bad { background: rgba(214, 90, 72, .16); }
+.battle-report li.good { background: rgba(156, 179, 90, .14); }
+.battle-report li.tip { color: var(--muted); font-style: italic; }
+.battle-report .num { font-weight: 700; color: var(--gold2); white-space: nowrap; }
+.battle-report .num.down { color: var(--red); }
+.br-close { position: absolute; top: 4px; right: 6px; background: none; border: none; color: var(--muted); font-size: 1.3em; cursor: pointer; }
+.br-close:hover { color: var(--text); }
+
+/* ---------------- battle: animations on the board */
+.fx-arrow { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 44; pointer-events: none; overflow: visible; }
+.fx-arrow line {
+  stroke: #ff5a44; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 2000; stroke-dashoffset: 2000;
+  filter: drop-shadow(0 0 6px rgba(255, 90, 68, .9));
+  animation: fxarrow .95s ease-out forwards;
+}
+@keyframes fxarrow { 0% { stroke-dashoffset: 2000; opacity: 1; } 35% { stroke-dashoffset: 0; opacity: 1; } 80% { opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+.card.fx-lunge, .fx-ghost.fx-lunge { z-index: 3; animation: fxlunge .6s ease-in-out; }
+@keyframes fxlunge {
+  0%, 100% { transform: none; }
+  40% { transform: translate(var(--dx), var(--dy)) scale(1.08); box-shadow: 0 0 22px var(--red); }
+}
+.card.fx-struck, .fx-ghost.fx-struck { animation: fxstruck .5s ease-out; }
+@keyframes fxstruck {
+  0%, 100% { transform: none; filter: none; }
+  15% { transform: translateX(-6px); filter: brightness(1.6) sepia(1) hue-rotate(-30deg) saturate(4); }
+  35% { transform: translateX(6px); }
+  55% { transform: translateX(-3px); }
+}
+.dmg-float.card-dmg { font-size: 2em; }
+.dmg-float.counter { color: #ff9a3c; }
+.dmg-float.none { color: var(--muted); }
+.fx-ghost { position: fixed; z-index: 4; pointer-events: none; border-radius: 7px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, .5); }
+.fx-ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fx-ghost.fx-die { animation: fxdie 1.1s ease-in forwards; }
+.fx-ghost.fx-die::after {
+  content: '💀'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 2.6em; background: rgba(120, 20, 10, .45); animation: shatterin .2s ease-out;
+}
+@keyframes fxdie {
+  0% { transform: none; filter: none; opacity: 1; }
+  25% { transform: scale(1.08) rotate(-3deg); filter: brightness(1.5) sepia(1) saturate(3) hue-rotate(-30deg); }
+  100% { transform: scale(.6) rotate(8deg) translateY(30px); filter: grayscale(1) brightness(.3); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.fx-lunge, .card.fx-struck, .fx-ghost.fx-die { animation-duration: .01s; }
+}

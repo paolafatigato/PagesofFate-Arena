@@ -58,6 +58,27 @@
     if (s.log.length > 200) s.log.shift();
   }
 
+  // visual events for the interface (fights, direct hits, deaths): s.fx, numbered by s.fxSeq
+  function fx(s, e) {
+    s.fxSeq = (s.fxSeq || 0) + 1;
+    e.seq = s.fxSeq;
+    (s.fx = s.fx || []).push(e);
+    if (s.fx.length > 30) s.fx.shift();
+  }
+
+  // why cards lose DEF or die, explained to the players:
+  // CAUSE describes what is hurting cards right now, ACT numbers the action being applied
+  let CAUSE = '';
+  let ACT = 0;
+  function setCause(i, text, force) { i.flags.cause = { text, force: !!force, act: ACT }; }
+  function deathReason(s, i) {
+    const c = i.flags.cause && i.flags.cause.act === ACT ? i.flags.cause : null;
+    if (i.flags.forceDie) return c && c.force ? c.text : (CAUSE || 'destroyed by an effect');
+    const base = c ? c.text : CAUSE;
+    const d = Math.max(0, getDef(s, i));
+    return base ? `${base}, its DEF fell to ${d}` : `its DEF fell to ${d} (a bonus ended or its protector left)`;
+  }
+
   function makeInst(s, id, owner) {
     const c = BY_ID[id];
     return {
@@ -161,17 +182,18 @@
       }
     }
     i.def -= left;
+    setCause(i, CAUSE || 'damage');
     // Cupid, Bound Hearts: the linked card shares the loss
     const bond = i.statuses.find(st => st.kind === 'bound');
     if (bond) {
       const partner = findField(s, bond.data);
-      if (partner) partner.def -= n;
+      if (partner) { partner.def -= n; setCause(partner, `it shares the ${n} damage taken by its bound heart ${nameOf(i)}`); }
     }
     i.flags.killer = killer;
     return n;
   }
 
-  function forceDie(i, killer) { i.flags.forceDie = true; i.flags.killer = killer; }
+  function forceDie(i, killer) { i.flags.forceDie = true; i.flags.killer = killer; setCause(i, CAUSE || 'destroyed by an effect', true); }
 
   function sendToGrave(s, i) {
     s.players[i.owner].grave.push({ uid: i.uid, id: i.id });
@@ -209,6 +231,7 @@
     const p = i.ctrl;
     const pl = s.players[p];
     const killer = i.flags.killer === undefined ? s.current : i.flags.killer;
+    fx(s, { k: 'death', uid: i.uid, id: i.id, p, why: deathReason(s, i) });
     removeFromField(s, i);
 
     // Odysseus, Voyage of Ten Years (once per game)
@@ -226,7 +249,7 @@
     const bond = i.statuses.find(st => st.kind === 'bound');
     if (bond) {
       const partner = findField(s, bond.data);
-      if (partner) { forceDie(partner, killer); log(s, `${nameOf(partner)} shares the fate of its bound heart.`); }
+      if (partner) { const was = CAUSE; CAUSE = `its bound heart ${nameOf(i)} died`; forceDie(partner, killer); CAUSE = was; log(s, `${nameOf(partner)} shares the fate of its bound heart.`); }
     }
     // Furies, Curse of Guilt
     if (isHumanOrDemigod(i) && passiveSources(s, 'furies').length) {
@@ -241,7 +264,10 @@
     // Atlas, The Fall of the Sky
     if (i.id === 'atlas' && passiveOn(s, i)) {
       log(s, `The sky falls! Every card on the field is hit with 3 ATK.`);
+      const was = CAUSE;
+      CAUSE = 'the sky fell when Atlas died (3 damage)';
       for (const c of allField(s)) dealDamage(s, c, 3, p, false);
+      CAUSE = was;
     }
     // Iphigenia, Martyr's Gift
     if (i.id === 'iphigenia') { log(s, `Iphigenia's sacrifice: ${s.players[i.owner].name} draws two cards.`); draw(s, i.owner, 2); }
@@ -843,12 +869,12 @@
 
   function afterAttack(s, A) {
     if (!findField(s, A.uid)) return;
-    if (A.id === 'minotaur' && passiveOn(s, A)) A.def -= 1;
-    if (A.flags.weary) A.def -= 1;
+    if (A.id === 'minotaur' && passiveOn(s, A)) { A.def -= 1; setCause(A, 'the Minotaur tires after attacking (-1 DEF)'); }
+    if (A.flags.weary) { A.def -= 1; setCause(A, 'Bellerophon tires after attacking (-1 DEF)'); }
     if (A.flags.swiftTurn === s.turn) addStatus(A, 'exhausted', s.turn + 2, 0, A.uid);
     if (A.id === 'icarus' && A.flags.waxTurn === s.turn) {
       A.flags.waxTurn = null;
-      if (!onField(s, A.ctrl, 'daedalus').length) { forceDie(A, A.ctrl); log(s, `The sun melts Icarus' wings.`); }
+      if (!onField(s, A.ctrl, 'daedalus').length) { forceDie(A, A.ctrl); setCause(A, 'the sun melted his wax wings', true); log(s, `The sun melts Icarus' wings.`); }
     }
     if (A.id === 'diomedes') A.flags.godslayerTurn = null;
   }
@@ -856,7 +882,8 @@
   // a single fight: A attacks D
   function fight(s, A, D, actor) {
     if (A.id === 'kronos' && D.id === 'uranus') {
-      forceDie(D, A.ctrl); A.atk += 2;
+      forceDie(D, A.ctrl); setCause(D, 'overthrown by Kronos', true); A.atk += 2;
+      fx(s, { k: 'fight', a: A.uid, aId: A.id, aP: A.ctrl, d: D.uid, dId: D.id, dP: D.ctrl, atkA: getAtk(s, A), atkD: getAtk(s, D), toD: 0, toA: 0, note: 'Kronos overthrows Uranus' });
       log(s, `Kronos overthrows Uranus! Uranus is destroyed and Kronos gains +2 ATK permanently.`);
       return;
     }
@@ -868,8 +895,16 @@
       log(s, `Daphne escapes ${nameOf(A)}: the attack does no damage (Flight).`);
     }
     log(s, `${nameOf(A)} (${getAtk(s, A)}) attacks ${nameOf(D)} (${getAtk(s, D)}): deals ${toD}, takes ${toA}.`);
-    dealDamage(s, D, toD, A.ctrl, true);
-    dealDamage(s, A, toA, D.ctrl, true);
+    const atkA = getAtk(s, A), atkD = getAtk(s, D);
+    const defD = getDef(s, D), defA = getDef(s, A);
+    const was = CAUSE;
+    CAUSE = `after the attack of ${nameOf(A)} (${toD} damage)`;
+    const gotD = dealDamage(s, D, toD, A.ctrl, true);
+    CAUSE = `after ${nameOf(D)} hit back (${toA} damage)`;
+    const gotA = dealDamage(s, A, toA, D.ctrl, true);
+    CAUSE = was;
+    fx(s, { k: 'fight', a: A.uid, aId: A.id, aP: A.ctrl, d: D.uid, dId: D.id, dP: D.ctrl, atkA, atkD,
+      toD: gotD, toA: gotA, defD: [defD, getDef(s, D)], defA: [defA, getDef(s, A)] });
     if (A.id === 'oedipus' && getDef(s, D) <= 0 && !cannotDie(s, D)) {
       log(s, `Blind Insight: truth comes at a cost, ${s.players[D.ctrl].name} draws a card.`);
       draw(s, D.ctrl, 1);
@@ -926,7 +961,7 @@
   function newGame(names) {
     const s = {
       v: 1, nextUid: 1, turn: 0, current: 0, first: Math.random() < 0.5 ? 0 : 1,
-      phase: 'mulligan', pending: null, winner: null, lastAbility: null, log: [],
+      phase: 'mulligan', pending: null, winner: null, lastAbility: null, log: [], fx: [], fxSeq: 0,
       players: names.map(n => ({ name: n, life: CONFIG.LIFE, coins: 0, deck: [], hand: [], field: [], grave: [], effects: [], usedGame: {}, mulliganDone: false })),
     };
     s.players.forEach((pl, p) => {
@@ -953,9 +988,9 @@
     draw(s, p, 1);
     for (const c of pl.field) {
       // Circe, Love's Weakness
-      if (c.id === 'circe' && anyOnField(s, 'odysseus').length) { c.def -= 1; log(s, `Circe's magic weakens before true love: -1 DEF.`); }
+      if (c.id === 'circe' && anyOnField(s, 'odysseus').length) { c.def -= 1; setCause(c, 'Circe weakens before Odysseus (-1 DEF each turn)'); log(s, `Circe's magic weakens before true love: -1 DEF.`); }
       // Echo fades after using her voice
-      if (c.id === 'echo' && c.flags.fading) { c.def -= 1; log(s, `Echo's voice fades: -1 DEF.`); }
+      if (c.id === 'echo' && c.flags.fading) { c.def -= 1; setCause(c, 'Echo\'s voice fades (-1 DEF each turn)'); log(s, `Echo's voice fades: -1 DEF.`); }
     }
     cleanup(s);
   }
@@ -963,8 +998,8 @@
   function endTurn(s) {
     const t = s.turn;
     for (const c of allField(s)) {
-      if (c.flags.dieAtEnd && c.ctrl === s.current) { forceDie(c, c.ctrl); log(s, `Midas cannot eat or drink gold, and dies.`); }
-      if (c.statuses.some(st => st.kind === 'temporary' && st.until <= t)) { forceDie(c, c.ctrl); log(s, `${nameOf(c)} returns to the underworld.`); }
+      if (c.flags.dieAtEnd && c.ctrl === s.current) { forceDie(c, c.ctrl); setCause(c, 'Midas cannot eat or drink gold', true); log(s, `Midas cannot eat or drink gold, and dies.`); }
+      if (c.statuses.some(st => st.kind === 'temporary' && st.until <= t)) { forceDie(c, c.ctrl); setCause(c, 'its borrowed time ran out: it returns to the underworld', true); log(s, `${nameOf(c)} returns to the underworld.`); }
     }
     cleanup(s);
     if (s.phase === 'over') return;
@@ -1005,6 +1040,8 @@
   function applyAction(s, p, a) {
     if (s.phase === 'over') throw new Error('The game is over');
     const pl = s.players[p];
+    ACT += 1;
+    CAUSE = '';
 
     if (a.type === 'mulligan') {
       if (s.phase !== 'mulligan' || pl.mulliganDone) throw new Error('Not now');
@@ -1085,6 +1122,7 @@
         if (needs && (!T || T.skip)) continue;
         if (!needs && def.steps) continue;
         if (def.limit === 'game') pl.usedGame[key] = 1;
+        CAUSE = `${nameOf(inst)}'s ${ab.name}`;
         def.run(s, inst, T || {});
         recordAbility(s, inst, key, def);
         if (s.pending) break;
@@ -1105,6 +1143,7 @@
       validateTargets(s, inst, def, a.T);
       markUsed(s, inst, key, def);
       log(s, `${pl.name} uses ${nameOf(inst)}: ${ab.name}.`);
+      CAUSE = `${nameOf(inst)}'s ${ab.name}`;
       def.run(s, inst, a.T || {});
       recordAbility(s, inst, key, def);
       cleanup(s);
@@ -1122,6 +1161,7 @@
         const dmg = getAtk(s, A);
         s.players[opp(p)].life -= dmg;
         log(s, `${nameOf(A)} attacks ${s.players[opp(p)].name} directly: ${dmg} damage.`);
+        fx(s, { k: 'direct', a: A.uid, aId: A.id, aP: p, p: opp(p), dmg });
         afterAttack(s, A);
         cleanup(s);
         return;
@@ -1129,7 +1169,10 @@
       if (A.id === 'sisyphus' && passiveOn(s, A)) {
         A.attacksUsed += 1;
         log(s, `Endless Effort: Sisyphus attacks every card on the enemy field.`);
-        for (const D of s.players[opp(p)].field.slice()) dealDamage(s, D, getAtk(s, A), p, true);
+        CAUSE = `hit by Sisyphus' Endless Effort (${getAtk(s, A)} damage)`;
+        const hit = s.players[opp(p)].field.slice();
+        fx(s, { k: 'sweep', a: A.uid, aId: A.id, aP: p, targets: hit.map(D => D.uid), dmg: getAtk(s, A) });
+        for (const D of hit) dealDamage(s, D, getAtk(s, A), p, true);
         afterAttack(s, A);
         cleanup(s);
         return;
@@ -1153,6 +1196,7 @@
       const X = pl.field.find(i => i.uid === a.discard);
       if (!R || !X) throw new Error('Choose a card to discard');
       R.statuses = R.statuses.filter(st => st.kind !== 'riddle');
+      CAUSE = 'discarded to answer the Sphinx\'s riddle';
       forceDie(X, p);
       log(s, `${pl.name} answers the Sphinx's riddle by discarding ${nameOf(X)}.`);
       cleanup(s);
@@ -1166,7 +1210,9 @@
       if (sac.length !== 3 || new Set(a.uids).size !== 3) throw new Error('Choose exactly 3 of your cards');
       const sum = sac.reduce((t, i) => t + getAtk(s, i), 0);
       if (sum < 9) throw new Error(`Their ATK sum is ${sum}: it must be 9 or more`);
+      CAUSE = 'sacrificed to destroy Gaia';
       sac.forEach(i => forceDie(i, p));
+      CAUSE = `destroyed by the sacrifice of three cards (ATK ${sum})`;
       forceDie(G, p);
       log(s, `${pl.name} sacrifices three cards (ATK ${sum}) to break the Earth: Gaia is destroyed.`);
       cleanup(s);
