@@ -624,7 +624,11 @@
         forceDie(sac, src.ctrl);
         cleanup(s);
         const inst = reviveFromGrave(s, src.ctrl, src.ctrl, T.t[1][0]);
-        if (inst) log(s, `Charon takes his coin: ${nameOf(inst)} crosses back from the Styx.`);
+        if (!inst) return;
+        // restoring its special effects: its once-per-game abilities can be used again
+        const used = s.players[src.ctrl].usedGame;
+        for (const ab of card(inst).abilities) delete used[abilityKey(inst, ab)];
+        log(s, `Charon takes his coin: ${nameOf(inst)} crosses back from the Styx with its special effects restored.`);
       } },
     'circe:transformation_potion': { type: 'active', limit: 'game', uses: 2,
       steps: [enemyCard('Choose a Human to transform', (s, c, src) => isHuman(c) && !(src.flags.potionTargets || []).includes(c.uid))],
