@@ -601,11 +601,18 @@
     return `<span class="badge-stats"><span class="${cls(a, c.atk)}">${a}</span>/<span class="${cls(d, c.def)}">${d}</span></span>`;
   }
 
+  const TYPE_LABEL = { [CARD_TYPES.HUMAN]: ['Human', 'human'], [CARD_TYPES.CREATURE]: ['Creature', 'creature'], [CARD_TYPES.DEITY]: ['Deity', 'deity'] };
+  function typeBadge(c) {
+    const [label, cls] = TYPE_LABEL[c.type] || [c.type, ''];
+    const text = c.tags.includes('demigod') ? label + ' · Demigod' : label;
+    return `<span class="badge-type ${cls}" title="${esc(c.type)}">${text}</span>`;
+  }
+
   function cardHTML(v, i, where, extraCls) {
     if (i.hidden) return `<div class="card back" title="Hidden card"></div>`;
     const c = BY_ID[i.id];
     let inner = `<img src="${c.image}" alt="${esc(c.name)}" loading="lazy" draggable="false">`;
-    if (where === 'field') inner += `<div class="status-row">${!E.isReady(v, i) && !i.flags.hasteTurn ? '<span title="Just arrived">💤</span>' : ''}${statusIcons(i)}</div>` + statsBadge(v, i);
+    if (where === 'field') inner += `<div class="status-row">${!E.isReady(v, i) && !i.flags.hasteTurn ? '<span title="Just arrived: cannot attack yet">💤</span>' : ''}${statusIcons(i)}</div>` + statsBadge(v, i);
     if (where === 'hand' && i.owner !== undefined) {
       const cost = E.costOf(v, meIdx(), c);
       inner += `<span class="badge-cost ${cost < c.cost ? 'cheap' : ''}" title="Cost">${cost}</span>`;
@@ -936,7 +943,7 @@
       <button class="zoom-nav next" data-handnav="1" aria-label="Next card">›</button>
       <div class="zoom-count">${hand.indexOf(inst) + 1} / ${hand.length} · ← → browse your hand · Enter plays it</div>` : '';
     // the card image already prints name, type, source, description and ability text
-    let html = `${nav}<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">`;
+    let html = `${nav}<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">${typeBadge(c)}`;
 
     if (where === 'field') {
       const a = E.getAtk(v, inst), d = E.getDef(v, inst);
@@ -1001,8 +1008,8 @@
         <li>At the start of each turn, each player has a number of coins equal to the current turn number, up to a maximum of ${C.MAX_COINS} coins.</li>
         <li>To play a card, you must pay its cost in coins. If you cannot pay the cost, you cannot play that card.</li></ul>
       <h3>Special abilities</h3><ul>
-        <li>Unless a card says otherwise, its special abilities can be used only if the card has already been on the field for at least one full turn.</li></ul>
-      <h3>Card types</h3><ul><li>The symbols at the top of the card show its type: 👤 Humans, 🐍 Creatures &amp; Monsters, ⚡ Deities &amp; Celestial Beings.</li></ul>
+        <li>Special abilities can be used as soon as the card is played, unless the card says otherwise.</li></ul>
+      <h3>Card types</h3><ul><li>The symbols at the top of the card show its type: 👤 Humans, 🐍 Creatures &amp; Monsters, ⚡ Deities &amp; Celestial Beings. The type is also written in the card details.</li></ul>
       <h3>Stats</h3><ul><li>The numbers at the bottom show the card's attack and defense. The first number is ATK, the second is DEF (1/4 means 1 ATK and 4 DEF).</li></ul>
       <h3>Combat</h3><ul>
         <li>When a card attacks, it also takes damage equal to the ATK of the card it is attacking.</li>
@@ -1036,7 +1043,7 @@
       <button class="zoom-nav next" data-zoomnav="1" aria-label="Next card">›</button>
       <div class="zoom-count">${zoomNav.idx + 1} / ${n}</div>` : '';
     $('zoomBody').innerHTML = `${nav}<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
-      ${btn}${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
+      ${typeBadge(c)}${btn}${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
     </div></div>`;
     $('zoom').hidden = false;
   }
@@ -1089,7 +1096,19 @@
   }
   function toggleSelect(kind, uid) {
     if (kind === 'pick') {
-      if (app.ui.pick.has(uid)) app.ui.pick.delete(uid); else app.ui.pick.add(uid);
+      const pick = app.ui.pick;
+      const max = (app.view.pending && app.view.pending.max) || Infinity;
+      if (pick.has(uid)) pick.delete(uid);
+      else {
+        // at the limit, the new card replaces the oldest selection (with max 1 it simply switches card)
+        while (pick.size >= max) {
+          const old = pick.values().next().value;
+          pick.delete(old);
+          const oldEl = document.querySelector(`#modal .pick-grid [data-pick="${old}"]`);
+          if (oldEl) oldEl.classList.remove('selected');
+        }
+        pick.add(uid);
+      }
     } else {
       pickTarget(uid); // may close the grid when the step is complete
     }
@@ -1237,7 +1256,11 @@
         case 'targetConfirm': return nextStep();
         case 'targetSkip': { const tg = ui.target; ui.target = null; closeModal(); render(); return tg.done({ skip: true }); }
         case 'targetCancel': ui.target = null; closeModal(); return render();
-        case 'pickConfirm': { closeModal(); $('modal').dataset.pending = ''; return dispatch({ type: 'pick', uids: [...ui.pick] }); }
+        case 'pickConfirm': {
+          const pend = app.view.pending;
+          if (pend && (ui.pick.size < pend.min || ui.pick.size > pend.max)) return toast(`Choose ${pend.min === pend.max ? pend.max : pend.min + ' to ' + pend.max} card(s)`);
+          closeModal(); $('modal').dataset.pending = ''; return dispatch({ type: 'pick', uids: [...ui.pick] });
+        }
         case 'rematch': {
           if (app.mode === 'local') { app.state = E.newGame(app.state.players.map(p => p.name)); app.viewer = null; return sync(); }
           if (app.mode === 'host') { app.state = E.newGame(app.names); return sync(); }

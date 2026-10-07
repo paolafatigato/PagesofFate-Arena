@@ -7,8 +7,8 @@
  *  - At the beginning of each turn the player draws one card. Max 7 cards in hand (extra draws are discarded).
  *  - Coins at the start of each turn = turn number (round), max 10. Playing a card costs its coins.
  *    HOUSE RULE: +1 bonus coin every turn (2 coins in round 1), otherwise the first turns are almost always passed.
- *  - Abilities can be used only if the card has been on the field for at least one full turn,
- *    unless the card says otherwise ("When played", passive effects, reactions).
+ *  - Abilities can be used as soon as the card is played, unless the card says otherwise
+ *    (an ability that must wait one full turn sets `needsTurn: true` in the ABILITIES table).
  *  - Combat: both cards deal damage equal to their ATK. Damage >= DEF destroys the card.
  *    Several cards can attack the same card. Damage stays on the card.
  *  HOUSE RULES (not written on the rule sheet):
@@ -741,6 +741,8 @@
     return usedCount(s, i, key, def) < 1;
   }
   function isReady(s, i) { return i.enteredTurn !== null && s.turn >= i.enteredTurn + 2; }
+  // abilities work as soon as the card is on the field, unless the ability says otherwise
+  function abilityReady(s, i, def) { return i.enteredTurn !== null && (!(def && def.needsTurn) || isReady(s, i)); }
   function silenced(s, i) { return hasStatus(i, 'stun') || hasStatus(i, 'captive') || ariadneBlocks(s, i); }
 
   // returns null if usable, otherwise a reason string
@@ -751,7 +753,7 @@
     if (def.type !== 'active') return def.type === 'onPlay' ? 'Triggers when played' : def.type === 'reaction' ? 'Triggers during the opponent\'s attack' : 'Always active';
     if (s.phase !== 'play' || s.pending) return 'Not now';
     if (s.current !== p || i.ctrl !== p) return 'Only on your turn';
-    if (!isReady(s, i)) return 'Needs one full turn on the field';
+    if (!abilityReady(s, i, def)) return 'Needs one full turn on the field';
     if (silenced(s, i)) return 'This card cannot use abilities now';
     if (!hasUsesLeft(s, i, key, def)) return def.limit === 'game' ? 'Already used this game' : def.limit === 'life' ? 'Already used' : 'Already used this turn';
     if (def.can && !def.can(s, i)) return 'No valid situation';
@@ -915,7 +917,7 @@
   function reactionOptions(s, A, D) {
     const p = D.ctrl;
     const pl = s.players[p];
-    const ready = i => isReady(s, i) && !silenced(s, i);
+    const ready = i => abilityReady(s, i) && !silenced(s, i);
     const opts = [];
     if (D.id === 'zeus' && !pl.usedGame['zeus:transformation'] && !silenced(s, D))
       opts.push({ key: 'zeus:transformation', src: D.uid, label: 'Zeus — Transformation: dodge this attack' });
