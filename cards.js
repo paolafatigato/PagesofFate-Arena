@@ -626,7 +626,7 @@ const CARDS = [
       {
         "id": "spawn_of_terror",
         "name": "Spawn of Terror",
-        "text": "She may summon one monster from your deck to your hand. Show your choice to your opponent and shuffle."
+        "text": "She may summon one monster from your deck or from your discard pile to your hand. Show your choice to your opponent and shuffle."
       },
       {
         "id": "monstrous_legacy",
@@ -741,7 +741,7 @@ const CARDS = [
       {
         "id": "earths_endurance",
         "name": "Earth's Endurance",
-        "text": "Gaia can be destroyed only by sacrificing 3 cards whose ATK points' sum is 9 or more. The earth itself cannot be easily broken."
+        "text": "Gaia can be destroyed only by sacrificing 3 cards (from the field or the hand) whose ATK points' sum is 9 or more. The earth itself cannot be easily broken."
       }
     ]
   },
@@ -1025,7 +1025,7 @@ const CARDS = [
     "id": "midas",
     "name": "King Midas",
     "type": CARD_TYPES.HUMAN,
-    "cost": 4,
+    "cost": 2,
     "atk": 1,
     "def": 3,
     "title": "The man with the golden touch",

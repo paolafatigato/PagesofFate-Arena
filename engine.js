@@ -9,6 +9,7 @@
  *    HOUSE RULE: +1 bonus coin every turn (2 coins in round 1), otherwise the first turns are almost always passed.
  *  - Abilities can be used as soon as the card is played, unless the card says otherwise
  *    (an ability that must wait one full turn sets `needsTurn: true` in the ABILITIES table).
+ *    Abilities that only boost the card's own attack this turn need the card to be able to attack now.
  *  - Combat: both cards deal damage equal to their ATK. Damage >= DEF destroys the card.
  *    Several cards can attack the same card. Damage stays on the card.
  *  HOUSE RULES (not written on the rule sheet):
@@ -118,7 +119,7 @@
     // Echidna, Monstrous Legacy: all other Monster cards gain +1 ATK, even enemies'
     if (isCreature(i)) a += passiveSources(s, 'echidna').filter(e => e !== i).length;
     // Chiron, Master of Heroes
-    if (['achilles', 'heracles'].includes(i.id) && passiveSources(s, 'chiron', i.ctrl).length) a += 1;
+    if (['achilles', 'heracles', 'asclepius'].includes(i.id) && passiveSources(s, 'chiron', i.ctrl).length) a += 1;
     // Menelaus, War for Helen
     if (i.id === 'menelaus' && anyOnField(s, 'helen').length) a += 2;
     // Athena, Wisdom of War (+2 ATK target)
@@ -363,7 +364,9 @@
 
   // ---------------------------------------------------------------- abilities
   // target step: { from: 'field'|'grave', side: 'enemy'|'ally'|'any', count, min, filter(s, cand, src, prev, viewer), prompt }
-  // ability: { type: 'active'|'onPlay'|'passive'|'reaction', limit: 'game'|'life'|'turn', uses, steps, choice, can(s,src), run(s,src,T) }
+  // ability: { type: 'active'|'onPlay'|'passive'|'reaction', limit: 'game'|'life'|'turn', uses, steps, choice, can(s,src), needsAttack(s,defender), run(s,src,T) }
+  // needsAttack: the ability boosts this card's attack for this turn only, so it can be used only when the card
+  // can attack now and at least one enemy card it can attack matches the filter
 
   // Artemis, Protector of Women: no female Human card can be targeted by enemy abilities
   function shielded(s, target, src) {
@@ -376,7 +379,7 @@
 
   const ABILITIES = {
     // ---------- HUMANS
-    'achilles:rage_of_achilles': { type: 'active', limit: 'game', run(s, src) {
+    'achilles:rage_of_achilles': { type: 'active', limit: 'game', needsAttack: (s, d) => isHumanOrDemigod(d), run(s, src) {
       src.flags.rageTurn = s.turn;
       addStatus(src, 'tempDef', s.turn + 2, -2, src.uid);
       log(s, `Rage of Achilles: +3 damage against Humans and Demigods this turn, -2 DEF for the next two turns.`);
@@ -409,7 +412,7 @@
       run(s, src, T) { const t = findField(s, T.t[0][0]); if (T.choice === 0) t.atk += 3; else t.def += 3; log(s, `Daedalus improves ${nameOf(t)}: ${T.choice === 0 ? '+3 ATK' : '+3 DEF'}.`); } },
     'daedalus:labyrinth_mastery': { type: 'passive' },
     'daphne:flight': { type: 'passive' },
-    'diomedes:godslayer': { type: 'active', limit: 'game', run(s, src) { src.flags.godslayerTurn = s.turn; log(s, `Godslayer: Diomedes' next attack against a God ignores half its defense.`); } },
+    'diomedes:godslayer': { type: 'active', limit: 'game', needsAttack: (s, d) => isDeity(d), run(s, src) { src.flags.godslayerTurn = s.turn; log(s, `Godslayer: Diomedes' next attack against a God ignores half its defense.`); } },
     'echo:mirror_voice': { type: 'onPlay', copy: true, run(s, src, T) {
       const last = s.lastAbility;
       if (!last || s.turn - last.turn > 1) { log(s, `Echo finds no voice to repeat.`); return; }
@@ -448,7 +451,7 @@
         if (inst) { addStatus(inst, 'temporary', s.turn + 2, 0, src.uid); log(s, `Heracles drags ${nameOf(inst)} back from Hades: it fights for you next turn, then returns below.`); }
       } },
     'homer:memory_of_the_odyssey': { type: 'passive' },
-    'icarus:wax_wings': { type: 'active', limit: 'game', run(s, src) { src.flags.waxTurn = s.turn; log(s, `Wax Wings: Icarus doubles his ATK for his next attack this turn.`); } },
+    'icarus:wax_wings': { type: 'active', limit: 'game', needsAttack: () => true, run(s, src) { src.flags.waxTurn = s.turn; log(s, `Wax Wings: Icarus doubles his ATK for his next attack this turn.`); } },
     'iphigenia:martyrs_gift': { type: 'passive' },
     'jason:the_argonauts': { type: 'onPlay', run(s, src) {
       const pl = s.players[src.ctrl];
@@ -556,10 +559,13 @@
       run(s, src, T) { const t = findField(s, T.t[0][0]); t.def += 3; log(s, `Chiron heals ${nameOf(t)}: +3 DEF.`); } },
     'chiron:master_of_heroes': { type: 'passive' },
     'echidna:spawn_of_terror': { type: 'active', limit: 'turn', run(s, src) {
+      // a living Monster from the deck or a dead one from the discard pile
       const pl = s.players[src.ctrl];
-      const opts = pl.deck.map((id, k) => ({ uid: 'd' + k, id })).filter(o => BY_ID[o.id].type === CARD_TYPES.CREATURE);
-      if (!opts.length) { log(s, `Echidna finds no monster in the deck.`); return; }
-      s.pending = { kind: 'pick', player: src.ctrl, handler: 'deckToHand', reveal: true, title: 'Spawn of Terror: choose a Monster to add to your hand', options: opts, min: 1, max: 1 };
+      const isMonster = o => BY_ID[o.id].type === CARD_TYPES.CREATURE;
+      const opts = pl.deck.map((id, k) => ({ uid: 'd' + k, id, from: 'deck' })).filter(isMonster)
+        .concat(pl.grave.map(g => ({ uid: 'g:' + g.uid, id: g.id, from: 'discard pile' })).filter(isMonster));
+      if (!opts.length) { log(s, `Echidna finds no monster in the deck or in the discard pile.`); return; }
+      s.pending = { kind: 'pick', player: src.ctrl, handler: 'echidnaSummon', reveal: true, title: 'Spawn of Terror: choose one Monster (from your deck or your discard pile) to add to your hand', options: opts, min: 0, max: 1 };
     } },
     'echidna:monstrous_legacy': { type: 'passive' },
     'medusa:petrifying_gaze': { type: 'active', limit: 'game',
@@ -655,6 +661,8 @@
         const a = findField(s, T.t[0][0]), b = findField(s, T.t[1][0]);
         removeFromField(s, a); removeFromField(s, b);
         const pa = a.ctrl; a.ctrl = b.ctrl; b.ctrl = pa;
+        // both cards are ready for their new masters: they can attack and use abilities right away
+        for (const c of [a, b]) { c.enteredTurn = Math.min(c.enteredTurn, s.turn - 2); c.attacksUsed = 0; c.usedTurn = {}; }
         s.players[a.ctrl].field.push(a); s.players[b.ctrl].field.push(b);
         log(s, `Crossroads: ${nameOf(a)} and ${nameOf(b)} change masters forever.`);
       } },
@@ -758,6 +766,11 @@
     if (!hasUsesLeft(s, i, key, def)) return def.limit === 'game' ? 'Already used this game' : def.limit === 'life' ? 'Already used' : 'Already used this turn';
     if (def.can && !def.can(s, i)) return 'No valid situation';
     if (def.steps && !stepsPossible(s, i, def)) return 'No valid target';
+    // attack boosts that last only this turn: don't let them be wasted when the card cannot attack
+    if (def.needsAttack) {
+      if (whyCannotAttack(s, p, i)) return 'This card cannot attack this turn: keep the ability for later';
+      if (!attackTargets(s, i).some(d => def.needsAttack(s, d))) return 'No enemy card this ability works against';
+    }
     return null;
   }
 
@@ -1037,6 +1050,15 @@
       shuffle(pl.deck);
       log(s, pend.reveal ? `${pl.name} adds ${ids.map(id => BY_ID[id].name).join(', ')} to their hand and shuffles the deck.` : `${pl.name} adds ${ids.length} card(s) to their hand and shuffles the deck.`);
     },
+    echidnaSummon(s, pend, chosen) {
+      if (!chosen.length) { log(s, `Spawn of Terror: ${s.players[pend.player].name} summons no monster.`); return; }
+      if (!chosen[0].startsWith('g:')) return PICK_HANDLERS.deckToHand(s, pend, chosen);
+      const pl = s.players[pend.player];
+      const k = pl.grave.findIndex(g => g.uid === chosen[0].slice(2));
+      if (k < 0) return;
+      const [g] = pl.grave.splice(k, 1);
+      if (addToHand(s, pend.player, g.id)) log(s, `Spawn of Terror: ${pl.name} calls ${BY_ID[g.id].name} back from the discard pile to their hand.`);
+    },
   };
 
   function applyAction(s, p, a) {
@@ -1129,6 +1151,16 @@
         recordAbility(s, inst, key, def);
         if (s.pending) break;
       }
+      // Echidna, Spawn of Terror: offered right away when she enters the field (counts as this turn's use)
+      if (inst.id === 'echidna' && !s.pending) {
+        const ab = c.abilities.find(x => x.id === 'spawn_of_terror');
+        if (!whyCannotUse(s, p, inst, ab)) {
+          const key = abilityKey(inst, ab), def = ABILITIES[key];
+          markUsed(s, inst, key, def);
+          def.run(s, inst, {});
+          recordAbility(s, inst, key, def);
+        }
+      }
       cleanup(s);
       return;
     }
@@ -1208,12 +1240,15 @@
     if (a.type === 'gaia') {
       const G = s.players[opp(p)].field.find(i => i.uid === a.gaia && i.id === 'gaia');
       if (!G) throw new Error('Gaia is not on the enemy field');
-      const sac = (a.uids || []).map(u => pl.field.find(i => i.uid === u)).filter(Boolean);
-      if (sac.length !== 3 || new Set(a.uids).size !== 3) throw new Error('Choose exactly 3 of your cards');
-      const sum = sac.reduce((t, i) => t + getAtk(s, i), 0);
+      // the 3 cards can come from the field (current ATK) or the hand (printed ATK)
+      const onField = (a.uids || []).map(u => pl.field.find(i => i.uid === u)).filter(Boolean);
+      const inHand = (a.uids || []).map(u => pl.hand.find(i => i.uid === u)).filter(Boolean);
+      if (onField.length + inHand.length !== 3 || new Set(a.uids).size !== 3) throw new Error('Choose exactly 3 of your cards');
+      const sum = onField.reduce((t, i) => t + getAtk(s, i), 0) + inHand.reduce((t, i) => t + BY_ID[i.id].atk, 0);
       if (sum < 9) throw new Error(`Their ATK sum is ${sum}: it must be 9 or more`);
       CAUSE = 'sacrificed to destroy Gaia';
-      sac.forEach(i => forceDie(i, p));
+      onField.forEach(i => forceDie(i, p));
+      inHand.forEach(i => { pl.hand.splice(pl.hand.indexOf(i), 1); pl.grave.push({ uid: i.uid, id: i.id }); });
       CAUSE = `destroyed by the sacrifice of three cards (ATK ${sum})`;
       forceDie(G, p);
       log(s, `${pl.name} sacrifices three cards (ATK ${sum}) to break the Earth: Gaia is destroyed.`);

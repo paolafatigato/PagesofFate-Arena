@@ -602,10 +602,12 @@
   }
 
   const TYPE_LABEL = { [CARD_TYPES.HUMAN]: ['Human', 'human'], [CARD_TYPES.CREATURE]: ['Creature', 'creature'], [CARD_TYPES.DEITY]: ['Deity', 'deity'] };
+  // card tags that abilities refer to (e.g. "Human or Demigod", "female Human", "Trojan cards")
+  const TAG_LABEL = { demigod: 'Demigod', female: 'Female', trojan: 'Trojan' };
   function typeBadge(c) {
     const [label, cls] = TYPE_LABEL[c.type] || [c.type, ''];
-    const text = c.tags.includes('demigod') ? label + ' · Demigod' : label;
-    return `<span class="badge-type ${cls}" title="${esc(c.type)}">${text}</span>`;
+    const tags = c.tags.filter(t => TAG_LABEL[t]).map(t => `<span class="badge-type tag">${TAG_LABEL[t]}</span>`).join('');
+    return `<div class="type-row"><span class="badge-type ${cls}" title="${esc(c.type)}">${label}</span>${tags}</div>`;
   }
 
   function cardHTML(v, i, where, extraCls) {
@@ -788,8 +790,10 @@
     } else if (pend.kind === 'pick') {
       app.ui.pick = new Set();
       openModal(`<h2>${esc(pend.title)}</h2>
-        <p class="muted">Choose ${pend.min === pend.max ? pend.max : (pend.min + ' to ' + pend.max)} card(s). Tap a card to enlarge it and select it.</p>
-        <div class="pick-grid">${pend.options.map(o => gridCard(o.id, `data-pick="${o.uid}"`)).join('')}</div>
+        <p class="muted">${pend.min === 0 && pend.max === 1 ? 'Choose one card, or confirm without choosing to skip.' : `Choose ${pend.min === pend.max ? pend.max : (pend.min + ' to ' + pend.max)} card(s).`} Tap a card to enlarge it and select it.</p>
+        <div class="pick-grid">${pend.options.map(o => o.from
+          ? `<div class="gaia-opt">${gridCard(o.id, `data-pick="${o.uid}"`)}<span class="muted">from ${esc(o.from)}</span></div>`
+          : gridCard(o.id, `data-pick="${o.uid}"`)).join('')}</div>
         <button class="btn btn-gold" data-action="pickConfirm">Confirm</button>`);
     }
     $('modal').dataset.pending = 'yes';
@@ -955,7 +959,7 @@
         html += `<button class="btn btn-gold" data-action="attack" data-uid="${uid}" ${why ? 'disabled' : ''}>⚔ Attack</button>${why ? `<div class="ability why">${esc(why)}</div>` : ''}`;
         if (inst.statuses.some(x => x.kind === 'riddle')) html += `<button class="btn" data-action="riddle" data-uid="${uid}">Answer the riddle (discard a card from your field)</button>`;
       }
-      if (!mine && inst.id === 'gaia' && myTurn(v)) html += `<button class="btn" data-action="gaia" data-uid="${uid}">Destroy Gaia: sacrifice 3 of your cards (ATK sum ≥ 9)</button>`;
+      if (!mine && inst.id === 'gaia' && myTurn(v)) html += `<button class="btn" data-action="gaia" data-uid="${uid}">Destroy Gaia: sacrifice 3 of your cards from field or hand (ATK sum ≥ 9)</button>`;
     } else {
       const cost = E.costOf(v, me, c);
       const blocked = (inst.statuses || []).some(x => x.kind === 'blocked');
@@ -1051,7 +1055,7 @@
 
   // browsing the cards of a grid (or of the opening hand) one by one while enlarged
   let zoomNav = null; // { container: CSS selector of the grid, idx }
-  const navItems = () => (zoomNav ? [...document.querySelectorAll(zoomNav.container + ' > .card')] : []);
+  const navItems = () => (zoomNav ? [...document.querySelectorAll(zoomNav.container + ' .card')] : []);
   function zoomInfo(el) {
     if (el.dataset.pick !== undefined) return [el.dataset.id, selectButton('pick', el.dataset.pick)];
     if (el.dataset.gravepick !== undefined) return [el.dataset.id, selectButton('grave', el.dataset.gravepick)];
@@ -1166,12 +1170,40 @@
       T => dispatch({ type: 'riddle', uid, discard: T.t[0][0] }), '❓ Riddle of the Sphinx');
   }
 
+  // the 3 sacrificed cards can come from the field (current ATK) or the hand (printed ATK)
+  function gaiaPool() {
+    const v = app.view, pl = v.players[meIdx()];
+    return pl.field.map(i => ({ i, where: 'field', atk: E.getAtk(v, i) }))
+      .concat(pl.hand.filter(h => !h.hidden).map(i => ({ i, where: 'hand', atk: BY_ID[i.id].atk })));
+  }
+  function gaiaSum() {
+    const sel = app.ui.gaia.sel;
+    return gaiaPool().filter(x => sel.has(x.i.uid)).reduce((t, x) => t + x.atk, 0);
+  }
+  function gaiaStatus() {
+    const n = app.ui.gaia.sel.size, sum = gaiaSum();
+    return `Selected: ${n} / 3 · ATK sum: <b class="${sum >= 9 ? 'ok' : ''}">${sum}</b> / 9`;
+  }
   function doGaia(uid) {
-    const v = app.view;
-    const me = meIdx();
-    const src = { uid: '__gaia', id: 'gaia', ctrl: me, statuses: [], flags: {} };
-    startTargeting(src, { steps: [{ from: 'field', side: 'ally', count: 3, min: 3, prompt: 'Choose 3 of your cards to sacrifice (ATK sum ≥ 9)' }] },
-      T => dispatch({ type: 'gaia', gaia: uid, uids: T.t[0] }), '🌍 Destroy Gaia');
+    app.ui.gaia = { uid, sel: new Set() };
+    const pool = gaiaPool();
+    if (pool.length < 3) { app.ui.gaia = null; return toast('You need at least 3 cards (field or hand) to sacrifice.'); }
+    const grid = list => list.map(x => `<div class="gaia-opt">${gridCard(x.i.id, `data-gaiapick="${x.i.uid}"`)}<span class="muted">${x.atk} ATK</span></div>`).join('');
+    const field = pool.filter(x => x.where === 'field'), hand = pool.filter(x => x.where === 'hand');
+    openModal(`<p class="tb-mini">🌍 Destroy Gaia</p><h2>Choose 3 cards to sacrifice (ATK sum ≥ 9)</h2>
+      <p class="muted">They can come from your field or your hand. Tap a card to select it.</p>
+      ${field.length ? `<h4>Your field</h4><div class="pick-grid">${grid(field)}</div>` : ''}
+      ${hand.length ? `<h4>Your hand</h4><div class="pick-grid">${grid(hand)}</div>` : ''}
+      <p id="gaiaStatus">${gaiaStatus()}</p>
+      <button class="btn btn-gold" data-action="gaiaConfirm">Sacrifice</button><button class="btn" data-action="gaiaCancel">Cancel</button>`);
+  }
+  function toggleGaia(el) {
+    const sel = app.ui.gaia.sel, u = el.dataset.gaiapick;
+    if (sel.has(u)) sel.delete(u);
+    else if (sel.size >= 3) return toast('You can sacrifice only 3 cards');
+    else sel.add(u);
+    el.classList.toggle('selected', sel.has(u));
+    $('gaiaStatus').innerHTML = gaiaStatus();
   }
 
   // ============================================================ events
@@ -1200,6 +1232,8 @@
     }
     const hn = ev.target.closest('[data-handnav]');
     if (hn) return stepHand(Number(hn.dataset.handnav));
+    const gp = ev.target.closest('[data-gaiapick]');
+    if (gp && app.ui.gaia) return toggleGaia(gp);
     const el = ev.target.closest('[data-action],[data-uid],[data-grave],[data-revealed],[data-react],[data-pick],[data-gravepick],[data-choice],[data-zoom],[data-gallery]');
     if (!el) {
       if (ev.target === $('modal') && $('modal').dataset.pending !== 'yes' && !app.ui.target) closeModal();
@@ -1251,6 +1285,14 @@
         case 'attack': return doAttack(el.dataset.uid);
         case 'riddle': closeModal(); return doRiddle(el.dataset.uid);
         case 'gaia': closeModal(); return doGaia(el.dataset.uid);
+        case 'gaiaConfirm': {
+          const g = ui.gaia;
+          if (g.sel.size !== 3) return toast('Choose exactly 3 cards');
+          if (gaiaSum() < 9) return toast(`Their ATK sum is ${gaiaSum()}: it must be 9 or more`);
+          ui.gaia = null; closeModal();
+          return dispatch({ type: 'gaia', gaia: g.uid, uids: [...g.sel] });
+        }
+        case 'gaiaCancel': ui.gaia = null; return closeModal();
         case 'attackPlayer': { const a = ui.attack; ui.attack = null; return dispatch({ type: 'attack', uid: a.uid, target: 'player' }); }
         case 'attackCancel': ui.attack = null; return render();
         case 'targetConfirm': return nextStep();

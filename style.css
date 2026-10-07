@@ -188,8 +188,9 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   border-radius: 999px; min-width: 24px; height: 24px; display: grid; place-items: center; font-weight: 700; font-size: .85em;
 }
 .badge-cost.cheap { color: var(--green); }
+.type-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .badge-type {
-  display: inline-block; margin: 0 0 10px;
+  display: inline-block;
   background: rgba(20, 14, 9, .85); border: 1px solid currentColor; border-radius: 6px;
   padding: 2px 10px; font-size: .8em; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   color: var(--gold2);
@@ -197,6 +198,7 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
 .badge-type.human { color: #e3c9a0; }
 .badge-type.creature { color: var(--green); }
 .badge-type.deity { color: #8fc3e6; }
+.badge-type.tag { color: var(--muted); }
 .status-row { position: absolute; left: 3px; top: 3px; display: flex; flex-wrap: wrap; gap: 2px; max-width: 90%; }
 .status-row span { background: rgba(20, 14, 9, .85); border-radius: 5px; padding: 0 3px; font-size: .8em; }
 
@@ -213,7 +215,7 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
 /* the card image is the main content: big enough to read its printed text */
 .detail-img { width: min(480px, 60%, calc((100vh - 80px) * .716)); border-radius: 12px; flex-shrink: 0; box-shadow: 0 10px 30px rgba(0, 0, 0, .55); }
 .detail-info { flex: 1; min-width: 200px; }
-.detail-info > .ability:first-child, .detail-info > p:first-child, .detail-info > .badge-type + .ability, .detail-info > .badge-type + p { margin-top: 0; }
+.detail-info > .ability:first-child, .detail-info > p:first-child, .detail-info > .type-row + .ability, .detail-info > .type-row + p { margin-top: 0; }
 .detail-info .sub { color: var(--muted); margin: 0 0 10px; }
 .ability {
   border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--bg2);
@@ -361,6 +363,10 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   display: grid; place-items: center; font-weight: 700;
   background: var(--gold2); color: #24180a; box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
 }
+
+/* ---------------- Gaia's sacrifice: each card shows the ATK it counts for */
+.gaia-opt { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#gaiaStatus b.ok { color: var(--gold2); }
 
 /* ---------------- enlarged card: arrows to browse the other cards */
 .zoom-nav {

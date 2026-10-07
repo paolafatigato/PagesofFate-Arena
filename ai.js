@@ -216,11 +216,14 @@
       }
     }
 
-    // Gaia: sacrifice 3 cards with ATK sum >= 9
+    // Gaia: sacrifice 3 cards (field or hand) with ATK sum >= 9
     const gaia = s.players[1 - p].field.find(i => i.id === 'gaia');
-    if (gaia && pl.field.length >= 3) {
-      combos(pl.field, 3, [], 20)
-        .filter(c => c.reduce((t, i) => t + E.getAtk(s, i), 0) >= 9)
+    const atkOf = i => pl.hand.includes(i) ? BY_ID[i.id].atk : E.getAtk(s, i);
+    // strongest first, so the capped combinations still find the sums that reach 9
+    const pool = pl.field.concat(pl.hand).sort((a, b) => atkOf(b) - atkOf(a));
+    if (gaia && pool.length >= 3) {
+      combos(pool, 3, [], 20)
+        .filter(c => c.reduce((t, i) => t + atkOf(i), 0) >= 9)
         .forEach(c => moves.push({ type: 'gaia', gaia: gaia.uid, uids: c.map(i => i.uid) }));
     }
     return moves;
