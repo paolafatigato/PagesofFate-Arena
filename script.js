@@ -28,13 +28,13 @@
   const myTurn = v => v.phase === 'play' && !v.pending && v.current === meIdx();
 
   let toastTimer = null;
-  function toast(msg, kind) {
+  function toast(msg, kind, ms) {
     const t = $('toast');
     t.textContent = msg;
-    t.className = 'toast' + (kind === 'info' ? ' info' : '');
+    t.className = 'toast' + (kind === 'info' ? ' info' : kind === 'hint' ? ' hint' : '');
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
+    toastTimer = setTimeout(() => { t.hidden = true; }, ms || 3200);
   }
 
   function showScreen(id) {
@@ -181,8 +181,155 @@
     E.applyAction(app.state, AI_PLAYER, AI.chooseAction(app.state, AI_PLAYER, app.cpuLevel)); // the computer redraws first
   }
 
+  // ============================================================ hint (vs computer)
+  const HINT_LEVEL = 'normal';
+
+  function nameByUid(v, u) {
+    for (const pl of v.players) {
+      const c = pl.field.concat(pl.hand, pl.grave).find(x => x.uid === u && x.id);
+      if (c) return BY_ID[c.id].name;
+    }
+    return 'a card';
+  }
+
+  function describeHint(v, a) {
+    const me = meIdx();
+    const N = u => nameByUid(v, u);
+    const targets = a.T && Array.isArray(a.T.t) ? [].concat(...a.T.t) : [];
+    const on = targets.length ? ` on ${targets.map(N).join(', ')}` : '';
+    let spec = null;
+    if (a.type === 'play') spec = E.onPlaySpec(v, me, v.players[me].hand.find(h => h.uid === a.uid).id);
+    if (a.type === 'ability') spec = E.ABILITIES[E.findField(v, a.uid).id + ':' + a.ability];
+    const pick = spec && spec.choice && a.T && a.T.choice !== undefined ? ` (choose "${spec.choice.options[a.T.choice]}")` : '';
+    switch (a.type) {
+      case 'play': return a.T && a.T.skip ? `play ${N(a.uid)} without using its effect` : `play ${N(a.uid)}${on}${pick}`;
+      case 'ability': {
+        const i = E.findField(v, a.uid);
+        return `use ${BY_ID[i.id].name}'s ability "${BY_ID[i.id].abilities.find(x => x.id === a.ability).name}"${on}${pick}`;
+      }
+      case 'attack':
+        if (a.target === 'player') return `attack ${v.players[1 - me].name} directly with ${N(a.uid)}`;
+        if (a.target === 'all') return `attack with ${N(a.uid)}: it hits every enemy card`;
+        return `attack ${N(a.target)} with ${N(a.uid)}`;
+      case 'riddle': return `answer the riddle on ${N(a.uid)} by discarding ${N(a.discard)}`;
+      case 'gaia': return `sacrifice ${a.uids.map(N).join(', ')} to destroy Gaia`;
+      default: return 'end your turn: no move improves your position';
+    }
+  }
+
+  function showHint() {
+    const v = app.view;
+    if (app.mode !== 'cpu' || !v || v.phase === 'over' || autoAttacking) return;
+    if (v.pending) return toast('Answer the open choice first.');
+    if (v.phase === 'mulligan') {
+      if (v.players[0].mulliganDone) return;
+      const a = AI.chooseAction(app.state, 0, HINT_LEVEL);
+      app.ui.mulligan = new Set(a.uids);
+      render();
+      return toast(a.uids.length ? `💡 Hint: redraw ${a.uids.map(u => nameByUid(v, u)).join(', ')}, then confirm.` : '💡 Hint: keep this hand.', 'hint', 6000);
+    }
+    if (!myTurn(v)) return toast('Wait for your turn.');
+    app.ui.target = null; app.ui.attack = null;
+    closeModal();
+    const a = AI.chooseAction(app.state, 0, HINT_LEVEL) || { type: 'end' };
+    render();
+    const uids = aiTouched(a);
+    uids.forEach(u => document.querySelectorAll(`.field .card[data-uid="${u}"], #myHand .card[data-uid="${u}"]`).forEach(el => el.classList.add('hint-glow')));
+    if (a.type === 'end') $('endTurnBtn').classList.add('hint-glow');
+    if (a.type === 'attack' && a.target === 'player') $('oppBar').classList.add('hint-glow');
+    toast('💡 Hint: ' + describeHint(v, a) + '.', 'hint', 6000);
+  }
+
+  // ============================================================ attack with every card (enemy field empty)
+  let autoAttacking = false;
+
+  function directAttackers(v) {
+    const me = meIdx();
+    return v.players[me].field.filter(i => !E.whyCannotAttack(v, me, i) && E.canAttackPlayer(v, i));
+  }
+
+  function attackAll() {
+    if (autoAttacking) return;
+    autoAttacking = true;
+    render();
+    let guard = 0;
+    const step = () => {
+      const v = app.view;
+      const A = v && myTurn(v) && ++guard <= 20 ? directAttackers(v)[0] : null;
+      if (!A) { autoAttacking = false; return render(); }
+      const el = document.querySelector(`#myField .card[data-uid="${A.uid}"]`);
+      if (el) el.classList.add('auto-attack');
+      setTimeout(() => {
+        dispatch({ type: 'attack', uid: A.uid, target: 'player' });
+        setTimeout(step, 750);
+      }, 500);
+    };
+    step();
+  }
+
+  // ============================================================ visual effects
+  // "-3" flying away from a player's life when it drops
+  function lifeFloats(v) {
+    const now = v.players.map(pl => pl.life);
+    const before = app.prevLife;
+    app.prevLife = now;
+    if (!before) return;
+    now.forEach((life, p) => {
+      const d = life - before[p];
+      if (d >= 0) return;
+      const chip = $(p === meIdx() ? 'myBar' : 'oppBar').querySelector('.stat-chip.life');
+      if (!chip) return;
+      chip.classList.add('hit');
+      const r = chip.getBoundingClientRect();
+      const f = document.createElement('div');
+      f.className = 'dmg-float';
+      f.textContent = d;
+      f.style.left = (r.left + r.width / 2) + 'px';
+      f.style.top = r.top + 'px';
+      document.body.appendChild(f);
+      setTimeout(() => f.remove(), 1400);
+    });
+  }
+
+  // cards that left a hand straight for the discard pile (Midas, Medea, Trojan Horse…)
+  function handLosses(prev, v) {
+    if (!prev || prev.phase !== 'play' || v.phase !== 'play' && v.phase !== 'over') return [];
+    const out = [];
+    v.players.forEach((pl, p) => {
+      const inHand = new Set(prev.players[p].hand.map(h => h.uid));
+      const wasGrave = new Set(prev.players[p].grave.map(g => g.uid));
+      pl.grave.filter(g => inHand.has(g.uid) && !wasGrave.has(g.uid)).forEach(g => out.push({ p, id: g.id, name: pl.name }));
+    });
+    return out;
+  }
+
+  let shatterLayer = null;
+  function showShatter(loss) {
+    const c = BY_ID[loss.id];
+    if (!shatterLayer) {
+      shatterLayer = document.createElement('div');
+      shatterLayer.className = 'shatter-layer';
+      document.body.appendChild(shatterLayer);
+    }
+    const box = document.createElement('div');
+    box.className = 'shatter';
+    box.innerHTML = `<div class="shatter-card">
+        <img class="shard left" src="${c.image}" alt="${esc(c.name)}">
+        <img class="shard right" src="${c.image}" alt="">
+        <span class="smoke s1"></span><span class="smoke s2"></span><span class="smoke s3"></span><span class="smoke s4"></span>
+      </div>
+      <div class="shatter-label">${esc(c.name)} destroyed<br><small>from ${esc(loss.name)}'s hand</small></div>`;
+    shatterLayer.appendChild(box);
+    setTimeout(() => {
+      box.remove();
+      if (shatterLayer && !shatterLayer.children.length) { shatterLayer.remove(); shatterLayer = null; }
+    }, 2600);
+  }
+
   function setView(v, silent) {
+    const prev = app.view;
     app.view = v;
+    handLosses(prev, v).forEach(showShatter);
     app.ui.target = null;
     app.ui.attack = null;
     if (!silent) render();
@@ -262,7 +409,7 @@
     clearTimeout(app.aiTimer); app.aiTimer = null;
     try { if (app.conn) app.conn.close(); } catch (e) { /* ignore */ }
     try { if (app.peer) app.peer.destroy(); } catch (e) { /* ignore */ }
-    Object.assign(app, { mode: null, state: null, view: null, viewer: null, peer: null, conn: null });
+    Object.assign(app, { mode: null, state: null, view: null, viewer: null, peer: null, conn: null, prevLife: null });
     $('lobbyChoices').hidden = false;
     $('lobbyWaiting').hidden = true;
     hideCover(); closeModal();
@@ -328,6 +475,11 @@
     ['myBar', 'myField'].forEach(id => { $(id).classList.toggle('p0', me === 0); $(id).classList.toggle('p1', me === 1); });
     $('oppBar').classList.toggle('active-turn', v.phase === 'play' && v.current === op);
     $('myBar').classList.toggle('active-turn', v.phase === 'play' && v.current === me);
+    $('oppBar').classList.remove('hint-glow');
+    $('endTurnBtn').classList.remove('hint-glow');
+    $('hintBtn').hidden = app.mode !== 'cpu';
+    $('hintBtn').disabled = autoAttacking || v.phase === 'over' || (v.phase === 'mulligan' ? v.players[me].mulliganDone : !myTurn(v));
+    lifeFloats(v);
 
     // fields
     const targetSet = currentTargets();
@@ -412,7 +564,7 @@
     const ui = app.ui;
     let text = '';
     const buttons = [];
-    $('endTurnBtn').hidden = !(myTurn(v) && !ui.target && !ui.attack);
+    $('endTurnBtn').hidden = !(myTurn(v) && !ui.target && !ui.attack && !autoAttacking);
 
     if (v.phase === 'over') {
       text = v.winner === 'draw' ? 'The game ends in a draw.' : `${v.players[v.winner].name} wins!`;
@@ -432,8 +584,15 @@
       text = `Select a target for ${BY_ID[ui.attack.id].name}.`;
     } else if (v.pending) {
       text = v.pending.player === me ? 'Make your choice…' : `Waiting for ${v.players[v.pending.player].name}…`;
+    } else if (autoAttacking) {
+      text = `Attacking ${v.players[1 - me].name} with every card…`;
     } else if (myTurn(v)) {
       text = 'Your turn: play cards, attack or use abilities. Click a card for details.';
+      const n = v.players[1 - me].field.length ? 0 : directAttackers(v).length;
+      if (n) {
+        text = `${v.players[1 - me].name} has no cards on the field: attack them directly!`;
+        buttons.push([`⚔ Attack with all (${n})`, 'attackAll', true]);
+      }
     } else {
       text = app.mode === 'cpu' ? `${v.players[v.current].name} is thinking…` : `Waiting for ${v.players[v.current].name}…`;
     }
@@ -888,6 +1047,8 @@
           return;
         }
         case 'endTurn': return dispatch({ type: 'end' });
+        case 'hint': return showHint();
+        case 'attackAll': return attackAll();
         case 'mulligan': { const uids = [...ui.mulligan]; ui.mulligan = new Set(); return dispatch({ type: 'mulligan', uids }); }
         case 'play': return doPlay(el.dataset.uid);
         case 'ability': return doAbility(el.dataset.uid, el.dataset.ability);

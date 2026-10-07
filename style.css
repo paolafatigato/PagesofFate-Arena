@@ -373,3 +373,79 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   .zoom-nav.prev { left: 10px; }
   .zoom-nav.next { right: 10px; }
 }
+
+/* ---------------- hint (vs computer) */
+.toast.hint { background: #14303a; color: #d6f3fb; border-color: #6fd6e8; }
+.card.hint-glow, .btn.hint-glow, .player-bar.hint-glow { outline: 3px solid #6fd6e8; outline-offset: 2px; animation: hintpulse 1s ease-in-out 4; }
+@keyframes hintpulse { 50% { outline-color: transparent; box-shadow: 0 0 18px rgba(111, 214, 232, .8); } }
+
+/* ---------------- attack with all: attacker flash and damage numbers */
+.card.auto-attack { outline-color: var(--red); animation: autoattack .5s ease-in-out; }
+@keyframes autoattack {
+  0%, 100% { transform: none; filter: none; }
+  25% { filter: brightness(1.8); }
+  50% { transform: translateY(-22px) scale(1.06); filter: brightness(1.4); box-shadow: 0 0 24px var(--red); }
+  75% { filter: brightness(1.8); }
+}
+.stat-chip.life.hit { animation: lifehit .45s ease-out; }
+@keyframes lifehit { 0%, 100% { transform: none; } 20% { transform: translateX(-4px) scale(1.15); border-color: var(--red); } 60% { transform: translateX(4px); } }
+.dmg-float {
+  position: fixed; z-index: 45; pointer-events: none; transform: translate(-50%, -50%);
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 2.2em; color: var(--red);
+  text-shadow: 0 0 6px #000, 0 2px 10px rgba(214, 90, 72, .8);
+  animation: dmgfloat 1.4s ease-out forwards;
+}
+@keyframes dmgfloat {
+  0% { opacity: 0; transform: translate(-50%, -20%) scale(.6); }
+  15% { opacity: 1; transform: translate(-50%, -60%) scale(1.3); }
+  100% { opacity: 0; transform: translate(-50%, -260%) scale(1); }
+}
+
+/* ---------------- card destroyed from a hand: shown in the middle of the screen */
+.shatter-layer {
+  position: fixed; inset: 0; z-index: 35; pointer-events: none;
+  display: flex; align-items: center; justify-content: center; gap: 30px; flex-wrap: wrap; padding: 16px;
+  background: radial-gradient(circle, rgba(0, 0, 0, .55) 0%, transparent 70%);
+}
+.shatter { display: flex; flex-direction: column; align-items: center; gap: 10px; animation: shatterin .25s ease-out; }
+@keyframes shatterin { from { opacity: 0; transform: scale(.6); } }
+.shatter-card { position: relative; width: min(220px, 42vw); aspect-ratio: 1432 / 2000; }
+.shard { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 9px; box-shadow: 0 8px 30px rgba(0, 0, 0, .7); }
+.shard.left { clip-path: polygon(0 0, 52% 0, 46% 18%, 56% 34%, 44% 52%, 55% 70%, 47% 86%, 53% 100%, 0 100%); animation: shardleft 2.2s ease-in forwards; }
+.shard.right { clip-path: polygon(52% 0, 100% 0, 100% 100%, 53% 100%, 47% 86%, 55% 70%, 44% 52%, 56% 34%, 46% 18%); animation: shardright 2.2s ease-in forwards; }
+@keyframes shardleft {
+  0%, 10%, 20%, 30% { transform: translateX(0); filter: none; }
+  5%, 15%, 25% { transform: translateX(-5px) rotate(-1deg); }
+  38% { transform: none; filter: brightness(1.6) sepia(.5); }
+  100% { transform: translate(-90px, 140px) rotate(-28deg); opacity: 0; filter: grayscale(1) brightness(.4); }
+}
+@keyframes shardright {
+  0%, 10%, 20%, 30% { transform: translateX(0); filter: none; }
+  5%, 15%, 25% { transform: translateX(5px) rotate(1deg); }
+  38% { transform: none; filter: brightness(1.6) sepia(.5); }
+  100% { transform: translate(90px, 160px) rotate(32deg); opacity: 0; filter: grayscale(1) brightness(.4); }
+}
+.smoke {
+  position: absolute; width: 60%; aspect-ratio: 1; border-radius: 50%; opacity: 0;
+  background: radial-gradient(circle, rgba(190, 180, 165, .75) 0%, rgba(120, 110, 100, .35) 45%, transparent 70%);
+  animation: smoke 2s ease-out forwards;
+}
+.smoke.s1 { left: 20%; top: 30%; animation-delay: .7s; }
+.smoke.s2 { left: -5%; top: 10%; animation-delay: .8s; }
+.smoke.s3 { left: 45%; top: 5%; animation-delay: .9s; }
+.smoke.s4 { left: 15%; top: 55%; animation-delay: 1s; }
+@keyframes smoke {
+  0% { opacity: 0; transform: scale(.3); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-90px) scale(2.2); }
+}
+.shatter-label {
+  font-family: 'Cinzel', serif; font-weight: 700; color: var(--red); text-align: center; font-size: 1.2em;
+  text-shadow: 0 0 8px #000; animation: shatterlabel 2.5s ease-out forwards;
+}
+.shatter-label small { color: var(--text); font-weight: 500; font-size: .75em; }
+@keyframes shatterlabel { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .shard.left, .shard.right, .smoke, .card.auto-attack { animation-duration: .01s; }
+}
