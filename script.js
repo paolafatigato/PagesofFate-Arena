@@ -570,10 +570,35 @@
   function effectTags(text) {
     return EFFECT_TAGS.filter(t => t[3].test(text)).map(([icon, label, tip]) => `<span class="fx-tag" title="${esc(tip)}">${icon} ${label}</span>`).join('');
   }
+  // key words in an ability's text, by highlight colour
+  const HIGHLIGHTS = [
+    ['hl-up', /[+]\d+ (?:ATK|DEF|damage)|(?:gains?|adds?|gives?) [+]?\d+ (?:ATK|DEF)/gi],
+    ['hl-down', /(?:loses?|drops? by) \d+(?: (?:ATK|DEF))?|-\d+ (?:ATK|DEF)|half damage|into a 1\/1/gi],
+    ['hl-stat', /\b\d+ (?:ATK|DEF)\b|\bdouble (?:his|her|its) ATK\b/gi],
+    ['hl-time', /\b(?:once|twice) per (?:game|turn)\b|\bonce per card's life\b|\bfor (?:\d+|one|two|three) turns?\b|\bfor the next (?:\w+ )?turns?\b|\bnext turn\b|\btwice\b|\bthree times\b|\bpermanently\b|\bwhile [A-Z]\w+ (?:is|remains) (?:in play|on the field)\b|\bwhen played\b/gi],
+    ['hl-key', /\b(?:instantly )?destroy(?:s|ed)?\b|\bcannot (?:attack|die|be played|be targeted)\b|\bimmobiliz\w+|\btrapped\b|\bpetrif\w+|\bprotect(?:s|ing)?\b|\brevive\w*|\bbring back\b|\breturns? to (?:the field|your hand)\b|\btakes? control\b|\bsteals?\b|\bsacrifice\b|\bskips? one turn\b|\battacks? directly\b|\bdisabled\b|\blook at your opponent's (?:hand|cards)\b|\bdraw (?:one|two) cards?\b|\bimmune\b|\bsummon \w+ \w+\b|\bswap one \w+ card\b|\bpasses to the opponent's hand\b|\bshuffle one enemy card\b|\battacks all the cards\b|\bdoesn't die\b|\bwhen \w+ (?:enters the field|is played)\b/gi],
+    ['hl-type', /\b(?:Gods?|Demigods?|Humans?|Monsters?|female)\b/g],
+  ];
+  function highlight(text) {
+    const marks = [];
+    for (const [cls, re] of HIGHLIGHTS) {
+      for (const m of text.matchAll(re)) {
+        const s = m.index, e = s + m[0].length;
+        if (!marks.some(k => s < k.e && e > k.s)) marks.push({ s, e, cls });
+      }
+    }
+    marks.sort((a, b) => a.s - b.s);
+    let out = '', pos = 0;
+    for (const k of marks) {
+      out += esc(text.slice(pos, k.s)) + `<mark class="${k.cls}">${esc(text.slice(k.s, k.e))}</mark>`;
+      pos = k.e;
+    }
+    return out + esc(text.slice(pos));
+  }
   function abilityHTML(c, ab, extra) {
     const def = E.ABILITIES[c.id + ':' + ab.id] || {};
     const limit = def.limit === 'game' ? ' · ⏳ once per game' : def.limit === 'life' ? ' · ⏳ once per card\'s life' : def.limit === 'turn' && def.type === 'active' ? ' · 🔁 once per turn' : '';
-    return `<div class="ability"><div class="kind">${KIND_LABEL[def.type] || ''}${limit}</div><h4>${esc(ab.name)}</h4><div class="fx-tags">${effectTags(ab.text)}</div><p>${esc(ab.text)}</p>${extra || ''}</div>`;
+    return `<div class="ability"><div class="kind">${KIND_LABEL[def.type] || ''}${limit}</div><h4>${esc(ab.name)}</h4><div class="fx-tags">${effectTags(ab.text)}</div><p class="ability-text">${highlight(ab.text)}</p>${extra || ''}</div>`;
   }
 
   function openCardDetail(uid, where) {
@@ -585,8 +610,8 @@
     if (!inst || inst.hidden) return;
     const c = BY_ID[inst.id];
     const mine = inst.ctrl === me || where === 'hand';
-    let html = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
-      <h2>${esc(c.name)}</h2><p class="sub">${esc(c.type)} · ${esc(c.source)}</p>`;
+    // the card image already prints name, type, source, description and ability text
+    let html = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">`;
 
     if (where === 'field') {
       const a = E.getAtk(v, inst), d = E.getDef(v, inst);
@@ -602,7 +627,7 @@
     } else {
       const cost = E.costOf(v, me, c);
       const blocked = (inst.statuses || []).some(x => x.kind === 'blocked');
-      html += `<p><b>Cost:</b> ${cost} coins${cost < c.cost ? ' (Gift of Fire)' : ''} · <b>${c.atk}/${c.def}</b></p>`;
+      if (cost < c.cost) html += `<p><b>Cost now:</b> ${cost} coins (Gift of Fire)</p>`;
       if (v.phase === 'play') {
         const can = myTurn(v) && cost <= v.players[me].coins && !blocked;
         html += `<button class="btn btn-gold" data-action="play" data-uid="${uid}" ${can ? '' : 'disabled'}>Play this card</button>`;
@@ -612,7 +637,6 @@
       }
     }
 
-    html += `<p><i>${esc(c.description)}</i></p>`;
     for (const ab of c.abilities) {
       const def = E.ABILITIES[c.id + ':' + ab.id] || {};
       let btn = '';
@@ -674,7 +698,6 @@
   function zoomCard(id) {
     const c = BY_ID[id];
     $('zoomBody').innerHTML = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
-      <h2>${esc(c.name)}</h2><p class="sub">${esc(c.type)} · cost ${c.cost} · ${c.atk}/${c.def}</p><p><i>${esc(c.description)}</i></p>
       ${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
     </div></div>`;
     $('zoom').hidden = false;

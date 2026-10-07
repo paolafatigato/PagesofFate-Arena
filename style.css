@@ -197,12 +197,14 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   position: relative; width: 100%; max-width: 860px; max-height: calc(100vh - 32px); overflow-y: auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px;
 }
-.modal-close { position: absolute; top: 8px; right: 10px; background: none; border: none; color: var(--muted); font-size: 1.8em; cursor: pointer; line-height: 1; }
+.modal-close { position: absolute; top: 8px; right: 10px; z-index: 2; width: 36px; height: 36px; border-radius: 50%; background: rgba(20, 14, 9, .85); border: 1px solid var(--line); color: var(--text); font-size: 1.6em; cursor: pointer; line-height: 1; }
 .modal-close:hover { color: var(--text); }
 .modal h2 { font-family: 'Cinzel', serif; color: var(--gold2); margin: 0 0 6px; }
 .detail { display: flex; gap: 22px; align-items: flex-start; }
-.detail-img { width: 320px; max-width: 45%; border-radius: 10px; flex-shrink: 0; }
-.detail-info { flex: 1; min-width: 0; }
+/* the card image is the main content: big enough to read its printed text */
+.detail-img { width: min(480px, 60%, calc((100vh - 80px) * .716)); border-radius: 12px; flex-shrink: 0; box-shadow: 0 10px 30px rgba(0, 0, 0, .55); }
+.detail-info { flex: 1; min-width: 200px; }
+.detail-info > .ability:first-child, .detail-info > p:first-child { margin-top: 0; }
 .detail-info .sub { color: var(--muted); margin: 0 0 10px; }
 .ability {
   border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--bg2);
@@ -242,13 +244,15 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   .log-panel.closed { display: none; }
 }
 @media (max-width: 640px) {
+  .modal { padding: 6px; }
+  .modal-box { padding: 10px; max-height: calc(100vh - 12px); }
+  .detail { flex-direction: column; gap: 12px; }
+  .detail-img { width: 100%; max-width: none; align-self: center; border-radius: 10px; }
+  .detail-info { min-width: 0; width: 100%; }
   :root { --card-w: 74px; --hand-w: 86px; }
   .board { padding: 8px 10px 12px; }
   .brand { display: none; }
   .topbar { padding: 6px 10px; }
-  .detail { flex-direction: column; }
-  .detail-img { width: 100%; max-width: 280px; align-self: center; }
-  .modal-box { padding: 16px; }
   .badge-stats { font-size: .72em; padding: 0 4px; }
   .badge-cost { min-width: 19px; height: 19px; font-size: .72em; }
   .status-row span { font-size: .65em; }
@@ -308,3 +312,13 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
   font-size: .76em; padding: 2px 8px; border-radius: 999px; cursor: help;
   background: var(--panel); border: 1px solid var(--line); color: var(--text);
 }
+
+/* ---------------- ability text: highlighted key words */
+.ability-text { line-height: 1.5; }
+.ability-text mark { background: none; color: inherit; font-weight: 600; padding: 0 2px; border-radius: 3px; }
+.ability-text .hl-key  { color: var(--gold2); background: rgba(201, 162, 74, .14); }
+.ability-text .hl-up   { color: var(--green); background: rgba(156, 179, 90, .14); }
+.ability-text .hl-down { color: var(--red); background: rgba(214, 90, 72, .14); }
+.ability-text .hl-stat { color: var(--text); text-decoration: underline 1px var(--gold); text-underline-offset: 3px; }
+.ability-text .hl-time { color: var(--p0); font-style: italic; }
+.ability-text .hl-type { color: var(--p1); }
