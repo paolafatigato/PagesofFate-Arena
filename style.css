@@ -322,3 +322,33 @@ input[type=text]:focus { outline: 2px solid var(--gold); border-color: transpare
 .ability-text .hl-stat { color: var(--text); text-decoration: underline 1px var(--gold); text-underline-offset: 3px; }
 .ability-text .hl-time { color: var(--p0); font-style: italic; }
 .ability-text .hl-type { color: var(--p1); }
+
+/* ---------------- redraw phase: label on cards chosen for redraw */
+.redraw-mark {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+  background: rgba(20, 14, 9, .9); color: var(--gold2); border: 1px solid var(--gold);
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: .8em;
+}
+.card.redraw img { filter: grayscale(.7) brightness(.55); }
+.zoom-box .detail-info > .btn { margin: 0 0 8px; }
+
+/* ---------------- phone: bigger hand cards, 3 per row (two rows for 5-6 cards) */
+@media (max-width: 640px) {
+  :root { --card-w: 84px; }
+  .hand {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    overflow-x: visible; min-height: 0; padding: 8px 0 14px;
+  }
+  .hand .card { width: 100%; }
+  .hand .badge-cost { min-width: 24px; height: 24px; font-size: .85em; }
+  .redraw-mark { font-size: .7em; padding: 3px 8px; }
+}
+
+/* ---------------- pick grids: selected cards get a check badge */
+.pick-grid .card.selected { outline-color: var(--gold2); }
+.pick-grid .card.selected::after {
+  content: '✓'; position: absolute; right: 6px; top: 6px; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 700;
+  background: var(--gold2); color: #24180a; box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
+}

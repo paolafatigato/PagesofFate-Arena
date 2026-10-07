@@ -302,7 +302,7 @@
       const cost = E.costOf(v, meIdx(), c);
       inner += `<span class="badge-cost ${cost < c.cost ? 'cheap' : ''}" title="Cost">${cost}</span>`;
       if (i.statuses && i.statuses.some(st => st.kind === 'blocked')) inner += `<div class="status-row" style="top:30px">${statusIcons(i)}</div>`;
-      if (v.phase === 'mulligan') inner += `<span class="zoom-btn" data-zoom="${i.id}" title="Enlarge" role="button" aria-label="Enlarge ${esc(c.name)}">🔍</span>`;
+      if (v.phase === 'mulligan' && app.ui.mulligan.has(i.uid)) inner += `<span class="redraw-mark">🔄 Redraw</span>`;
     }
     return `<button class="card ${extraCls || ''}" data-uid="${i.uid}" data-where="${where}" title="${esc(c.name)}">${inner}</button>`;
   }
@@ -344,7 +344,7 @@
 
     // hand
     if (v.phase === 'mulligan') {
-      $('myHand').innerHTML = P[me].hand.map(i => cardHTML(v, i, 'hand', ui.mulligan.has(i.uid) ? 'selected dim' : '')).join('');
+      $('myHand').innerHTML = P[me].hand.map(i => cardHTML(v, i, 'hand', ui.mulligan.has(i.uid) ? 'selected redraw' : '')).join('');
     } else {
       $('myHand').innerHTML = P[me].hand.map(i => {
         const c = BY_ID[i.id];
@@ -421,7 +421,7 @@
     } else if (v.phase === 'mulligan') {
       if (v.players[me].mulliganDone) text = 'Waiting for your opponent to choose their hand…';
       else {
-        text = 'Click the cards you want to replace, then confirm. Use 🔍 to enlarge a card. You can redraw only once.';
+        text = 'Tap a card to read it and choose whether to redraw it, then confirm. You can redraw only once.';
         buttons.push([ui.mulligan.size ? `Redraw ${ui.mulligan.size} card(s)` : 'Keep this hand', 'mulligan', true]);
       }
     } else if (ui.target) {
@@ -461,7 +461,7 @@
     } else if (pend.kind === 'pick') {
       app.ui.pick = new Set();
       openModal(`<h2>${esc(pend.title)}</h2>
-        <p class="muted">Choose ${pend.min === pend.max ? pend.max : (pend.min + ' to ' + pend.max)} card(s).</p>
+        <p class="muted">Choose ${pend.min === pend.max ? pend.max : (pend.min + ' to ' + pend.max)} card(s). Tap a card to enlarge it and select it.</p>
         <div class="pick-grid">${pend.options.map(o => gridCard(o.id, `data-pick="${o.uid}"`)).join('')}</div>
         <button class="btn btn-gold" data-action="pickConfirm">Confirm</button>`);
     }
@@ -509,8 +509,8 @@
       toast('No valid target.'); app.ui.target = null; return render();
     }
     if (step.from === 'grave') {
-      openModal(`${tg.title ? `<p class="tb-mini">${esc(tg.title)}</p>` : ''}<h2>${esc(asSelect(step.prompt))}</h2>
-        <div class="pick-grid">${cands.map(g => `<button class="card" data-gravepick="${g.uid}"><img src="${BY_ID[g.id].image}" alt="${esc(BY_ID[g.id].name)}"></button>`).join('')}</div>
+      openModal(`${tg.title ? `<p class="tb-mini">${esc(tg.title)}</p>` : ''}<h2>${esc(asSelect(step.prompt))}</h2><p class="muted">Tap a card to enlarge it and select it.</p>
+        <div class="pick-grid">${cands.map(g => gridCard(g.id, `data-gravepick="${g.uid}"`, tg.picked[tg.idx].includes(g.uid) ? 'selected' : '')).join('')}</div>
         ${tg.optional ? '<button class="btn" data-action="targetSkip">Skip</button>' : ''}<button class="btn" data-action="targetCancel">Cancel</button>`);
       return;
     }
@@ -695,19 +695,45 @@
       <div class="pick-grid">${list.map(c => `<button class="card" data-zoom="${c.id}"><img src="${c.image}" alt="${esc(c.name)}" loading="lazy"></button>`).join('')}</div>`);
   }
 
-  function zoomCard(id) {
+  // btn: optional action button shown next to the enlarged card (Redraw, Select…)
+  function zoomCard(id, btn = '') {
     const c = BY_ID[id];
     $('zoomBody').innerHTML = `<div class="detail"><img class="detail-img" src="${c.image}" alt="${esc(c.name)}"><div class="detail-info">
-      ${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
+      ${btn}${c.abilities.map(ab => abilityHTML(c, ab)).join('')}
     </div></div>`;
     $('zoom').hidden = false;
   }
   function closeZoom() { $('zoom').hidden = true; $('zoomBody').innerHTML = ''; }
+  function redrawButton(uid) {
+    return app.ui.mulligan.has(uid)
+      ? `<button class="btn" data-redraw="${uid}">✓ Keep this card</button>`
+      : `<button class="btn btn-gold" data-redraw="${uid}">🔄 Redraw this card</button>`;
+  }
+  // kind 'pick' = pending choice (e.g. a card from the opponent's hand), 'grave' = target in a discard pile
+  function isPicked(kind, uid) {
+    if (kind === 'pick') return app.ui.pick.has(uid);
+    const tg = app.ui.target;
+    return !!tg && tg.picked[tg.idx].includes(uid);
+  }
+  function selectButton(kind, uid) {
+    return isPicked(kind, uid)
+      ? `<button class="btn" data-select="${kind}:${uid}">✓ Selected · tap to deselect</button>`
+      : `<button class="btn btn-gold" data-select="${kind}:${uid}">☑ Select this card</button>`;
+  }
+  function toggleSelect(kind, uid) {
+    if (kind === 'pick') {
+      if (app.ui.pick.has(uid)) app.ui.pick.delete(uid); else app.ui.pick.add(uid);
+    } else {
+      pickTarget(uid); // may close the grid when the step is complete
+    }
+    const el = document.querySelector(`#modal [data-${kind === 'pick' ? 'pick' : 'gravepick'}="${uid}"]`);
+    if (el) el.classList.toggle('selected', isPicked(kind, uid));
+  }
 
-  // a card picture in a modal grid, with a magnifier to read it
-  function gridCard(id, attr) {
+  // a card picture in a modal grid; tapping it enlarges it (with a Select button when attr makes it pickable)
+  function gridCard(id, attr, cls) {
     const c = BY_ID[id];
-    return `<button class="card" ${attr || `data-zoom="${id}"`}><img src="${c.image}" alt="${esc(c.name)}" loading="lazy"><span class="zoom-btn" data-zoom="${id}" title="Enlarge" role="button" aria-label="Enlarge ${esc(c.name)}">🔍</span></button>`;
+    return `<button class="card ${cls || ''}" data-id="${id}" ${attr || `data-zoom="${id}"`}><img src="${c.image}" alt="${esc(c.name)}" loading="lazy"></button>`;
   }
 
   // ============================================================ actions from UI
@@ -764,7 +790,23 @@
 
   // ============================================================ events
   document.addEventListener('click', ev => {
-    if (!$('zoom').hidden) { if (!ev.target.closest('.zoom-box') || ev.target.closest('[data-action="closeZoom"]')) closeZoom(); return; }
+    if (!$('zoom').hidden) {
+      const rd = ev.target.closest('[data-redraw]');
+      if (rd) {
+        const u = rd.dataset.redraw;
+        if (app.ui.mulligan.has(u)) app.ui.mulligan.delete(u); else app.ui.mulligan.add(u);
+        closeZoom();
+        return render();
+      }
+      const sel = ev.target.closest('[data-select]');
+      if (sel) {
+        const [kind, u] = sel.dataset.select.split(':');
+        closeZoom();
+        return toggleSelect(kind, u);
+      }
+      if (!ev.target.closest('.zoom-box') || ev.target.closest('[data-action="closeZoom"]')) closeZoom();
+      return;
+    }
     const el = ev.target.closest('[data-action],[data-uid],[data-grave],[data-revealed],[data-react],[data-pick],[data-gravepick],[data-choice],[data-zoom],[data-gallery]');
     if (!el) {
       if (ev.target === $('modal') && $('modal').dataset.pending !== 'yes' && !app.ui.target) closeModal();
@@ -774,13 +816,8 @@
     const ui = app.ui;
 
     if (el.dataset.react !== undefined) { closeModal(); $('modal').dataset.pending = ''; return dispatch({ type: 'react', index: Number(el.dataset.react) }); }
-    if (el.dataset.pick !== undefined) {
-      const u = el.dataset.pick;
-      if (ui.pick.has(u)) ui.pick.delete(u); else ui.pick.add(u);
-      el.classList.toggle('selected', ui.pick.has(u));
-      return;
-    }
-    if (el.dataset.gravepick !== undefined) { return pickTarget(el.dataset.gravepick); }
+    if (el.dataset.pick !== undefined) return zoomCard(el.dataset.id, selectButton('pick', el.dataset.pick));
+    if (el.dataset.gravepick !== undefined) return zoomCard(el.dataset.id, selectButton('grave', el.dataset.gravepick));
     if (el.dataset.choice !== undefined) {
       const tg = ui.target; ui.target = null; closeModal();
       return tg.done({ t: tg.finalT, choice: Number(el.dataset.choice) });
@@ -790,7 +827,7 @@
     if (el.dataset.grave !== undefined) return openGrave(Number(el.dataset.grave));
     if (el.dataset.revealed !== undefined) {
       const h = v.players[Number(el.dataset.revealed)].hand.filter(x => !x.hidden);
-      return openModal(`<h2>👁 ${esc(v.players[Number(el.dataset.revealed)].name)}'s revealed hand</h2><p class="muted">Tap 🔍 to read a card.</p><div class="pick-grid">${h.map(x => gridCard(x.id)).join('')}</div>`);
+      return openModal(`<h2>👁 ${esc(v.players[Number(el.dataset.revealed)].name)}'s revealed hand</h2><p class="muted">Tap a card to read it.</p><div class="pick-grid">${h.map(x => gridCard(x.id)).join('')}</div>`);
     }
 
     const action = el.dataset.action;
@@ -838,9 +875,9 @@
     const where = el.dataset.where;
     if (!v || !uid) return;
     if (v.phase === 'mulligan' && where === 'hand') {
-      if (v.players[meIdx()].mulliganDone) return;
-      if (ui.mulligan.has(uid)) ui.mulligan.delete(uid); else ui.mulligan.add(uid);
-      return render();
+      const inst = v.players[meIdx()].hand.find(h => h.uid === uid);
+      if (!inst) return;
+      return zoomCard(inst.id, v.players[meIdx()].mulliganDone ? '' : redrawButton(uid));
     }
     if (ui.attack && where === 'field') {
       const targets = currentTargets();
