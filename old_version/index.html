@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Battle Arena 🎴</title>
+
+  <!-- CSS esterno -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Lobby Screen -->
+    <div id="lobbyScreen" class="screen active">
+      <div class="lobby-screen">
+        <h1>Card Battle Arena 🎴</h1>
+        
+        <div class="input-group">
+          <label>Your Name</label>
+          <input type="text" id="playerName" placeholder="Enter your name">
+        </div>
+
+        <div id="noMatchSection">
+          <button class="btn btn-primary" onclick="createGame()">Create New Game</button>
+          
+          <div class="divider">OR</div>
+          
+          <div class="input-group">
+            <label>Match Code</label>
+            <input type="text" id="matchCodeInput" placeholder="Enter match code" style="text-transform: uppercase">
+          </div>
+          <button class="btn btn-secondary" onclick="joinGame()">Join Game</button>
+        </div>
+
+        <div id="waitingSection" style="display: none;">
+          <div class="match-code-display">
+            <p>Match Code:</p>
+            <div class="code" id="displayMatchCode"></div>
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666;">Share this code with your opponent</p>
+          </div>
+          
+          <div class="players-list">
+            <p style="font-weight: bold; margin-bottom: 10px;">Players (<span id="playerCount">0</span>/2):</p>
+            <div id="playersList"></div>
+          </div>
+          
+          <button id="startGameBtn" class="btn btn-success" onclick="startGame()" style="display: none;">Start Game</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Redraw Screen -->
+    <div id="redrawScreen" class="screen">
+      <div class="lobby-screen" style="max-width: 900px;">
+        <h2 style="text-align: center; margin-bottom: 20px;">Initial Hand</h2>
+        <p style="text-align: center; margin-bottom: 30px;">You may redraw your hand once before the game starts</p>
+        
+        <div class="cards-container" id="redrawHand" style="justify-content: center;"></div>
+        
+        <div id="redrawActions" style="display: flex; gap: 15px; justify-content: center; margin-top: 30px;">
+          <button class="btn btn-primary" onclick="redrawHand()" style="width: auto; padding: 15px 30px;">Redraw Hand</button>
+          <button class="btn btn-success" onclick="skipRedraw()" style="width: auto; padding: 15px 30px;">Keep Hand</button>
+        </div>
+        
+        <p id="waitingForOpponent" style="display: none; text-align: center; font-size: 1.2em; color: #666; margin-top: 20px;">
+          Waiting for opponent...
+        </p>
+      </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen">
+      <div class="game-header">
+        <div class="turn-info">
+          <h2>Turn <span id="turnNumber">1</span></h2>
+          <p style="font-size: 0.9em; color: #666;">Match: <span id="gameMatchCode"></span></p>
+        </div>
+        <div id="turnStatus" class="turn-status"></div>
+        <div class="coins-display">
+          <div class="amount">💰 <span id="coinsAmount">0</span></div>
+          <p style="font-size: 0.9em; color: #666;">Coins</p>
+        </div>
+      </div>
+
+      <div id="actionModeDisplay" class="action-mode" style="display: none;"></div>
+
+      <div class="battlefield">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3>🎭 <span id="opponentName"></span></h3>
+          <div style="font-size: 0.9em; color: #666;">
+            <span style="margin-right: 20px;">🃏 Hand: <span id="opponentHandCount">0</span></span>
+            <span>📚 Deck: <span id="opponentDeckCount">0</span></span>
+          </div>
+        </div>
+        <div class="cards-container" id="opponentField"></div>
+      </div>
+
+      <div class="battlefield my-field">
+        <h3>⚔️ Your Battlefield</h3>
+        <div class="cards-container" id="myField"></div>
+      </div>
+
+      <div class="battlefield">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3>🎴 Your Hand</h3>
+          <button id="endTurnBtn" class="end-turn-btn" onclick="endTurn()">End Turn</button>
+        </div>
+        <div class="cards-container" id="myHand"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card Detail Modal -->
+  <div id="cardModal" class="modal" onclick="closeModal()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <button class="modal-close" onclick="closeModal()">×</button>
+      <div id="modalCardDetail"></div>
+    </div>
+  </div>
+
+  <!-- Libreria esterna -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- JavaScript esterno -->
+  <script src="cards.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
