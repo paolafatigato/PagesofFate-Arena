@@ -3,7 +3,7 @@
  * Pure game logic: no DOM access. The host runs it; clients use it only for previews/targeting.
  *
  * Official rules (from the rule sheets) + house rules needed to make a complete game:
- *  - Each player starts with 5 cards and may redraw once (mulligan) before the game begins.
+ *  - Each player starts with 6 cards and may redraw once (mulligan) before the game begins.
  *  - At the beginning of each turn the player draws one card. Max 7 cards in hand (extra draws are discarded).
  *  - Coins at the start of each turn = turn number (round), max 10. Playing a card costs its coins.
  *    HOUSE RULE: +1 bonus coin every turn (2 coins in round 1), otherwise the first turns are almost always passed.
@@ -21,7 +21,7 @@
   'use strict';
 
   const CONFIG = {
-    START_HAND: 5,
+    START_HAND: 6,
     MAX_HAND: 7,
     MAX_COINS: 10,
     COIN_BONUS: 1,
