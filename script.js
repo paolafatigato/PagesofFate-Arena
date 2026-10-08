@@ -979,6 +979,10 @@
       if (where === 'field' && def.type === 'active' && mine) {
         const why = E.whyCannotUse(v, me, inst, ab);
         btn = `<button class="btn btn-small btn-gold" data-action="ability" data-uid="${uid}" data-ability="${ab.id}" ${why ? 'disabled' : ''}>Use</button>${why ? ` <span class="why">${esc(why)}</span>` : ''}`;
+      } else if (where === 'hand' && def.type === 'onPlay' && v.phase === 'play') {
+        // tell the player before playing the card that its on-play effect would be wasted
+        const why = E.whyNoOnPlay(v, me, c.id, ab.id);
+        if (why) btn = `<span class="why">⚠ ${esc(why)}</span>`;
       }
       html += abilityHTML(c, ab, btn);
     }
@@ -1133,6 +1137,9 @@
     const inst = v.players[me].hand.find(h => h.uid === uid);
     const spec = E.onPlaySpec(v, me, inst.id);
     closeModal();
+    // explain why the card's on-play effect will not happen
+    const wasted = BY_ID[inst.id].abilities.map(ab => [ab, E.whyNoOnPlay(v, me, inst.id, ab.id)]).filter(x => x[1]);
+    if (wasted.length) toast(wasted.map(([ab, why]) => `${ab.name}: ${why}.`).join(' '), 'info', 6000);
     if (!spec) return dispatch({ type: 'play', uid });
     const src = { uid: '__new', id: inst.id, ctrl: me, owner: me, statuses: [], flags: {} };
     if (spec.steps && !E.candidates(v, src, spec.steps[0], []).length) return dispatch({ type: 'play', uid, T: { skip: true } });

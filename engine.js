@@ -367,6 +367,7 @@
   // ability: { type: 'active'|'onPlay'|'passive'|'reaction', limit: 'game'|'life'|'turn', uses, steps, choice, can(s,src), needsAttack(s,defender), run(s,src,T) }
   // needsAttack: the ability boosts this card's attack for this turn only, so it can be used only when the card
   // can attack now and at least one enemy card it can attack matches the filter
+  // revives: the ability brings a destroyed card back, so it is blocked while Cerberus is in play
 
   // Artemis, Protector of Women: no female Human card can be targeted by enemy abilities
   function shielded(s, target, src) {
@@ -421,7 +422,7 @@
       ab.run(s, src, T);
       src.flags.fading = true;
     } },
-    'eurydice:return_from_shadows': { type: 'active', limit: 'game',
+    'eurydice:return_from_shadows': { type: 'active', limit: 'game', revives: true,
       steps: [{ from: 'grave', side: 'ally', count: 1, prompt: 'Choose a destroyed Human card', filter: (s, g) => BY_ID[g.id].type === CARD_TYPES.HUMAN },
               enemyCard('Choose the enemy to attack')],
       run(s, src, T) {
@@ -441,8 +442,8 @@
       a.hand[ia] = cb; b.hand[ib] = ca;
       log(s, `Helen's beauty confuses all hearts: both players swap a random card from their hands.`);
     } },
-    'heracles:master_of_beasts': { type: 'active', limit: 'game',
-      can: s => s.players.some(pl => pl.grave.some(g => BY_ID[g.id].type === CARD_TYPES.CREATURE)),
+    'heracles:master_of_beasts': { type: 'active', limit: 'game', revives: true,
+      cant: 'No defeated Monster in any discard pile', can: s => s.players.some(pl => pl.grave.some(g => BY_ID[g.id].type === CARD_TYPES.CREATURE)),
       steps: [{ from: 'grave', side: 'any', count: 1, prompt: 'Choose a defeated Monster', filter: (s, g) => BY_ID[g.id].type === CARD_TYPES.CREATURE }],
       run(s, src, T) {
         const uid = T.t[0][0];
@@ -492,7 +493,7 @@
       log(s, `Trojan Horse: ${o.name} shows their hand. ${doomed.length ? doomed.map(c => BY_ID[c.id].name).join(', ') + ' destroyed.' : 'No card has DEF lower than 3.'}`);
     } },
     'oedipus:blind_insight': { type: 'passive' },
-    'orpheus:song_of_life': { type: 'onPlay', optional: true,
+    'orpheus:song_of_life': { type: 'onPlay', optional: true, revives: true,
       steps: [{ from: 'grave', side: 'ally', count: 1, prompt: 'Song of Life: choose a destroyed Human to revive (or skip)', filter: (s, g) => BY_ID[g.id].type === CARD_TYPES.HUMAN }],
       run(s, src, T) {
         const inst = reviveFromGrave(s, src.ctrl, src.ctrl, T.t[0][0], 'half');
@@ -563,7 +564,7 @@
       const pl = s.players[src.ctrl];
       const isMonster = o => BY_ID[o.id].type === CARD_TYPES.CREATURE;
       const opts = pl.deck.map((id, k) => ({ uid: 'd' + k, id, from: 'deck' })).filter(isMonster)
-        .concat(pl.grave.map(g => ({ uid: 'g:' + g.uid, id: g.id, from: 'discard pile' })).filter(isMonster));
+        .concat(reviveBlocked(s) ? [] : pl.grave.map(g => ({ uid: 'g:' + g.uid, id: g.id, from: 'discard pile' })).filter(isMonster));
       if (!opts.length) { log(s, `Echidna finds no monster in the deck or in the discard pile.`); return; }
       s.pending = { kind: 'pick', player: src.ctrl, handler: 'echidnaSummon', reveal: true, title: 'Spawn of Terror: choose one Monster (from your deck or your discard pile) to add to your hand', options: opts, min: 0, max: 1 };
     } },
@@ -614,7 +615,7 @@
     'calypso:captive_love': { type: 'active', limit: 'game',
       steps: [{ from: 'field', side: 'any', count: 1, prompt: 'Choose a Human or Demigod to keep captive', filter: (s, c) => isHumanOrDemigod(c) }],
       run(s, src, T) { const t = findField(s, T.t[0][0]); addStatus(t, 'captive', s.turn + 13, 0, src.uid); log(s, `Captive Love: ${nameOf(t)} is trapped on Ogygia for 7 turns. It cannot attack or use abilities, but it cannot die.`); } },
-    'charon:coin_for_passage': { type: 'active', limit: 'game',
+    'charon:coin_for_passage': { type: 'active', limit: 'game', revives: true,
       steps: [allyCard('Choose one of your cards to sacrifice', (s, c, src) => c !== src),
               { from: 'grave', side: 'ally', count: 1, prompt: 'Choose a destroyed card with the same value (cost)', filter: (s, g, src, prev) => {
                 const sac = findField(s, prev[0][0]); return sac && BY_ID[g.id].cost === card(sac).cost; } }],
@@ -707,8 +708,7 @@
     'naiads:healing_spring': { type: 'onPlay',
       steps: [allyCard('Healing Spring: choose an ally to gain +3 DEF', (s, c, src) => c !== src)],
       run(s, src, T) { src.flags.springTarget = T.t[0][0]; log(s, `Healing Spring: ${nameOf(findField(s, T.t[0][0]))} gains +3 DEF while the Naiads are on the field.`); } },
-    'persephone:seeds_of_return': { type: 'active', limit: 'game',
-      can: s => !reviveBlocked(s),
+    'persephone:seeds_of_return': { type: 'active', limit: 'game', revives: true,
       steps: [{ from: 'grave', side: 'ally', count: 1, prompt: 'Choose a defeated ally to revive' }],
       run(s, src, T) { const inst = reviveFromGrave(s, src.ctrl, src.ctrl, T.t[0][0], 'half'); if (inst) log(s, `Seeds of Return: ${nameOf(inst)} returns with half DEF.`); } },
     'poseidon:tidal_wrath': { type: 'active', limit: 'game', run(s, src) {
@@ -767,9 +767,10 @@
     if (s.current !== p || i.ctrl !== p) return 'Only on your turn';
     if (!abilityReady(s, i, def)) return 'Needs one full turn on the field';
     if (silenced(s, i)) return 'This card cannot use abilities now';
+    if (def.revives && reviveBlocked(s)) return 'Cerberus guards the underworld: no destroyed card can return';
     if (!hasUsesLeft(s, i, key, def)) return def.limit === 'game' ? 'Already used this game' : def.limit === 'life' ? 'Already used' : 'Already used this turn';
-    if (def.can && !def.can(s, i)) return 'No valid situation';
-    if (def.steps && !stepsPossible(s, i, def)) return 'No valid target';
+    if (def.can && !def.can(s, i)) return def.cant || 'Not possible right now';
+    if (def.steps && !stepsPossible(s, i, def)) return 'No valid target for: ' + def.steps[0].prompt;
     // attack boosts that last only this turn: don't let them be wasted when the card cannot attack
     if (def.needsAttack) {
       if (whyCannotAttack(s, p, i)) return 'This card cannot attack this turn: keep the ability for later';
@@ -818,6 +819,22 @@
     s.lastAbility = { key, turn: s.turn, name: ab ? ab.name : key, by: i.ctrl };
   }
 
+  // why an on-play ability would have no effect if the card were played now (null = it works)
+  function whyNoOnPlay(s, p, cardId, abId) {
+    const key = cardId + ':' + abId;
+    const def = ABILITIES[key];
+    if (!def || def.type !== 'onPlay') return null;
+    if (def.limit === 'game' && s.players[p].usedGame[key]) return 'Already used this game: it will not trigger again';
+    if (def.revives && reviveBlocked(s)) return 'Cerberus is in play: no destroyed card can return, so this ability has no effect';
+    if (def.copy) {
+      const last = s.lastAbility;
+      return !last || s.turn - last.turn > 1 ? 'No ability was used in the last turn: there is nothing to repeat' : null;
+    }
+    const src = { uid: '__new', id: cardId, ctrl: p, owner: p, statuses: [], flags: {} };
+    if (def.steps && candidates(s, src, def.steps[0], []).length < (def.steps[0].min || 1)) return 'No valid target right now: this ability will have no effect';
+    return null;
+  }
+
   // the spec a client should prompt for when playing a card (onPlay with steps / Echo copying)
   function onPlaySpec(s, p, cardId) {
     const c = BY_ID[cardId];
@@ -825,6 +842,7 @@
       const key = cardId + ':' + ab.id;
       const def = ABILITIES[key];
       if (!def || def.type !== 'onPlay') continue;
+      if (def.revives && reviveBlocked(s)) continue;
       if (def.copy) {
         const last = s.lastAbility;
         if (!last || s.turn - last.turn > 1) return null;
@@ -870,9 +888,13 @@
 
   function canAttackPlayer(s, i) { return s.players[opp(i.ctrl)].field.length === 0; }
 
+  // the ATK a card strikes with (Cerberus, Triple Bite: each of his strikes deals half damage)
+  function strikeAtk(s, A) {
+    const atk = getAtk(s, A);
+    return A.id === 'cerberus' && passiveOn(s, A) ? Math.ceil(atk / 2) : atk;
+  }
   function attackDamage(s, A, D) {
-    let dmg = getAtk(s, A);
-    if (A.id === 'cerberus' && passiveOn(s, A)) dmg = Math.ceil(dmg / 2);
+    let dmg = strikeAtk(s, A);
     if (A.id === 'theseus' && isCreature(D)) dmg += 1;
     if (A.id === 'minotaur' && passiveOn(s, A)) dmg += 2;
     if (A.id === 'achilles' && A.flags.rageTurn === s.turn && isHumanOrDemigod(D)) dmg += 3;
@@ -913,8 +935,8 @@
       toD = 0;
       log(s, `Daphne escapes ${nameOf(A)}: the attack does no damage (Flight).`);
     }
-    log(s, `${nameOf(A)} (${getAtk(s, A)}) attacks ${nameOf(D)} (${getAtk(s, D)}): deals ${toD}, takes ${toA}.`);
-    const atkA = getAtk(s, A), atkD = getAtk(s, D);
+    log(s, `${nameOf(A)} (${strikeAtk(s, A)}) attacks ${nameOf(D)} (${getAtk(s, D)}): deals ${toD}, takes ${toA}.`);
+    const atkA = strikeAtk(s, A), atkD = getAtk(s, D);
     const defD = getDef(s, D), defA = getDef(s, A);
     const was = CAUSE;
     CAUSE = `after the attack of ${nameOf(A)} (${toD} damage)`;
@@ -1146,6 +1168,7 @@
         const def = ABILITIES[key];
         if (!def || def.type !== 'onPlay') continue;
         if (def.limit === 'game' && pl.usedGame[key]) continue;
+        if (def.revives && reviveBlocked(s)) { log(s, `Cerberus guards the underworld: ${ab.name} has no effect.`); continue; }
         const needs = (spec && spec.key === key);
         if (needs && (!T || T.skip)) continue;
         if (!needs && def.steps) continue;
@@ -1196,7 +1219,7 @@
       if (a.target === 'player') {
         if (!canAttackPlayer(s, A)) throw new Error('You can attack the player only when their field is empty');
         A.attacksUsed += 1;
-        const dmg = getAtk(s, A);
+        const dmg = strikeAtk(s, A);
         s.players[opp(p)].life -= dmg;
         log(s, `${nameOf(A)} attacks ${s.players[opp(p)].name} directly: ${dmg} damage.`);
         fx(s, { k: 'direct', a: A.uid, aId: A.id, aP: p, p: opp(p), dmg });
@@ -1287,6 +1310,6 @@
   global.Engine = {
     CONFIG, BY_ID, ABILITIES, coinsForTurn, newGame, applyAction, viewFor, actingPlayer,
     getAtk, getDef, costOf, whyCannotUse, whyCannotAttack, attackTargets, canAttackPlayer,
-    candidates, onPlaySpec, abilityKey, isReady, findField, hasStatus, cannotDie, playerEffect, opp,
+    candidates, onPlaySpec, whyNoOnPlay, abilityKey, isReady, findField, hasStatus, cannotDie, playerEffect, opp,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
