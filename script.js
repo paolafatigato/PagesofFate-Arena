@@ -19,6 +19,10 @@
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        // PeerJS's own default relay (must be kept: a custom config replaces the defaults)
+        { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+        { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
         { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
       ],
     },
@@ -561,7 +565,7 @@
     app.peer = peer;
     const timeout = setTimeout(() => {
       if (app.peer === peer && !(app.conn && app.conn.open)) $('lobbyStatus').textContent = 'Could not connect. Check the code and that the host is still waiting, then Cancel and retry.';
-    }, 20000);
+    }, 40000);
     peer.on('error', err => {
       clearTimeout(timeout);
       $('lobbyStatus').textContent = err.type === 'peer-unavailable' ? 'No game found with this code.' : 'Connection error: ' + (err.type || err.message);
