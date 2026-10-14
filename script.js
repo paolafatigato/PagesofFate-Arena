@@ -13,6 +13,16 @@
   const E = window.Engine;
   const BY_ID = E.BY_ID;
   const PEER_PREFIX = 'pages-of-fate-v1-';
+  // STUN + public TURN relay so connections also work across different networks / strict NATs
+  const PEER_OPTIONS = {
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+      ],
+    },
+  };
   const $ = id => document.getElementById(id);
 
   const app = {
@@ -515,7 +525,7 @@
     $('hostCode').textContent = code;
     $('lobbyStatus').textContent = 'Connecting to the server…';
     app.mode = 'host'; app.me = 0; app.names = [name];
-    const peer = new Peer(PEER_PREFIX + code);
+    const peer = new Peer(PEER_PREFIX + code, PEER_OPTIONS);
     app.peer = peer;
     peer.on('open', () => { $('lobbyStatus').textContent = 'Waiting for your opponent to join…'; });
     peer.on('error', err => {
@@ -547,15 +557,19 @@
     $('hostCode').textContent = code;
     $('lobbyStatus').textContent = 'Connecting…';
     app.mode = 'guest'; app.me = 1;
-    const peer = new Peer();
+    const peer = new Peer(PEER_OPTIONS);
     app.peer = peer;
+    const timeout = setTimeout(() => {
+      if (app.peer === peer && !(app.conn && app.conn.open)) $('lobbyStatus').textContent = 'Could not connect. Check the code and that the host is still waiting, then Cancel and retry.';
+    }, 20000);
     peer.on('error', err => {
+      clearTimeout(timeout);
       $('lobbyStatus').textContent = err.type === 'peer-unavailable' ? 'No game found with this code.' : 'Connection error: ' + (err.type || err.message);
     });
     peer.on('open', () => {
       const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
       app.conn = conn;
-      conn.on('open', () => { conn.send({ t: 'hello', name }); $('lobbyStatus').textContent = 'Connected! Starting…'; });
+      conn.on('open', () => { clearTimeout(timeout); conn.send({ t: 'hello', name }); $('lobbyStatus').textContent = 'Connected! Starting…'; });
       conn.on('data', msg => {
         if (msg.t === 'state') { showScreen('game'); setView(msg.v); }
         else if (msg.t === 'error') toast(msg.msg);
