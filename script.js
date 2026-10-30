@@ -13,20 +13,27 @@
   const E = window.Engine;
   const BY_ID = E.BY_ID;
   const PEER_PREFIX = 'pages-of-fate-v1-';
-  // STUN + public TURN relay so connections also work across different networks / strict NATs
-  const PEER_OPTIONS = {
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun.relay.metered.ca:80' },
-        // PeerJS's own default relay (must be kept: a custom config replaces the defaults)
+  function logConn(tag, peer, conn) {
+    peer.on('open', id => console.log(`[net:${tag}] peer open`, id));
+    peer.on('disconnected', () => console.warn(`[net:${tag}] peer disconnected from broker`));
+    peer.on('error', e => console.error(`[net:${tag}] peer error`, e.type, e));
+    if (conn) watchConn(tag, conn);
+  }
+  function watchConn(tag, conn) {
+    console.log(`[net:${tag}] connection created with`, conn.peer);
+    conn.on('iceStateChanged', s => console.log(`[net:${tag}] ICE state:`, s));
+    conn.on('open', () => console.log(`[net:${tag}] data channel open`));
+    conn.on('close', () => console.warn(`[net:${tag}] connection closed`));
+    conn.on('error', e => console.error(`[net:${tag}] connection error`, e));
+  }
+  // PeerJS defaults (STUN + its own TURN relay); no custom ICE config
+  // Debug: open the page with ?relay to force traffic through the TURN relay
+  const PEER_OPTIONS = /[?&]relay\b/.test(location.search)
+    ? { config: { iceTransportPolicy: 'relay', iceServers: [
         { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
         { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
-      ],
-    },
-  };
+      ] } }
+    : {};
   const $ = id => document.getElementById(id);
 
   const app = {
@@ -531,6 +538,7 @@
     app.mode = 'host'; app.me = 0; app.names = [name];
     const peer = new Peer(PEER_PREFIX + code, PEER_OPTIONS);
     app.peer = peer;
+    logConn('host', peer);
     peer.on('open', () => { $('lobbyStatus').textContent = 'Waiting for your opponent to join…'; });
     peer.on('error', err => {
       $('lobbyStatus').textContent = 'Connection error: ' + (err.type || err.message);
@@ -539,6 +547,7 @@
     peer.on('connection', conn => {
       if (app.conn && app.conn.open) { conn.on('open', () => { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); }); return; }
       app.conn = conn;
+      watchConn('host', conn);
       conn.on('data', msg => {
         if (msg.t === 'hello') {
           app.names = [name, String(msg.name || 'Guest').slice(0, 20)];
@@ -563,6 +572,7 @@
     app.mode = 'guest'; app.me = 1;
     const peer = new Peer(PEER_OPTIONS);
     app.peer = peer;
+    logConn('guest', peer);
     const timeout = setTimeout(() => {
       if (app.peer === peer && !(app.conn && app.conn.open)) $('lobbyStatus').textContent = 'Could not connect. Check the code and that the host is still waiting, then Cancel and retry.';
     }, 40000);
@@ -573,6 +583,7 @@
     peer.on('open', () => {
       const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
       app.conn = conn;
+      watchConn('guest', conn);
       conn.on('open', () => { clearTimeout(timeout); conn.send({ t: 'hello', name }); $('lobbyStatus').textContent = 'Connected! Starting…'; });
       conn.on('data', msg => {
         if (msg.t === 'state') { showScreen('game'); setView(msg.v); }
