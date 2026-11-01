@@ -557,7 +557,13 @@
       } },
     'chiron:healing_wisdom': { type: 'active', limit: 'turn',
       steps: [allyCard('Choose an ally to heal')],
-      run(s, src, T) { const t = findField(s, T.t[0][0]); t.def += 3; log(s, `Chiron heals ${nameOf(t)}: +3 DEF.`); } },
+      run(s, src, T) {
+        // the bonus lasts until Chiron uses the ability again: the previous +3 DEF is withdrawn
+        for (const c of allField(s)) c.statuses = c.statuses.filter(st => !(st.kind === 'tempDef' && st.src === src.uid && st.until === 9999));
+        const t = findField(s, T.t[0][0]);
+        addStatus(t, 'tempDef', 9999, 3, src.uid);
+        log(s, `Chiron heals ${nameOf(t)}: +3 DEF until his next use (the previous bonus is withdrawn).`);
+      } },
     'chiron:master_of_heroes': { type: 'passive' },
     'echidna:spawn_of_terror': { type: 'active', limit: 'turn', run(s, src) {
       // a living Monster from the deck or a dead one from the discard pile
@@ -710,7 +716,14 @@
       run(s, src, T) { src.flags.springTarget = T.t[0][0]; log(s, `Healing Spring: ${nameOf(findField(s, T.t[0][0]))} gains +3 DEF while the Naiads are on the field.`); } },
     'persephone:seeds_of_return': { type: 'active', limit: 'game', revives: true,
       steps: [{ from: 'grave', side: 'ally', count: 1, prompt: 'Choose a defeated ally to revive' }],
-      run(s, src, T) { const inst = reviveFromGrave(s, src.ctrl, src.ctrl, T.t[0][0], 'half'); if (inst) log(s, `Seeds of Return: ${nameOf(inst)} returns with half DEF.`); } },
+      run(s, src, T) {
+        const inst = reviveFromGrave(s, src.ctrl, src.ctrl, T.t[0][0], 'half');
+        if (!inst) return;
+        // the revived card gets its once-per-game abilities back
+        const used = s.players[src.ctrl].usedGame;
+        for (const k of Object.keys(used)) if (k.startsWith(inst.id + ':')) delete used[k];
+        log(s, `Seeds of Return: ${nameOf(inst)} returns with half DEF, and its special abilities are restored.`);
+      } },
     'poseidon:tidal_wrath': { type: 'active', limit: 'game', run(s, src) {
       for (const c of s.players[opp(src.ctrl)].field) addStatus(c, 'tempAtk', s.turn + 1, -3, src.uid);
       log(s, `Tidal Wrath: all enemy cards lose 3 ATK for 1 turn.`);

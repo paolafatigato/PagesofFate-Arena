@@ -432,8 +432,8 @@ const CARDS = [
     "name": "Chiron",
     "type": CARD_TYPES.CREATURE,
     "cost": 4,
-    "atk": 5,
-    "def": 4,
+    "atk": 2,
+    "def": 3,
     "title": "The wise centaur and healer",
     "source": "Iliad - Homer",
     "description": "The immortal centaur who taught heroes like Achilles, Asclepius, and Heracles. Known for his wisdom, medicine, and skill in battle.",
@@ -443,7 +443,7 @@ const CARDS = [
       {
         "id": "healing_wisdom",
         "name": "Healing Wisdom",
-        "text": "He adds +3 DEF to one ally."
+        "text": "He adds +3 DEF to one ally. The bonus lasts until Chiron uses this ability again: the +3 DEF given before is removed."
       },
       {
         "id": "master_of_heroes",
@@ -1410,7 +1410,7 @@ const CARDS = [
       {
         "id": "seeds_of_return",
         "name": "Seeds of Return",
-        "text": "She can revive one defeated ally with half DEF. Usable once per game."
+        "text": "She can revive one defeated ally with half DEF. The revived card also gets its once-per-game special abilities back. Usable once per game."
       }
     ]
   },
