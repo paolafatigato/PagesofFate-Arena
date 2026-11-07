@@ -38,7 +38,7 @@
 
   const app = {
     mode: null, me: 0, state: null, view: null, viewer: null,
-    peer: null, conn: null, names: [],
+    peer: null, conn: null, names: [], decks: [null, null],
     cpuLevel: 'normal', aiTimer: null, aiTurn: null, aiMoves: 0,
     ui: { mulligan: new Set(), target: null, attack: null, logOpen: true },
   };
@@ -190,7 +190,7 @@
 
   function startCpu() {
     const level = $('cpuLevel').value;
-    app.mode = 'cpu'; app.me = 0; app.cpuLevel = level;
+    app.mode = 'cpu'; app.me = 0; app.cpuLevel = level; app.decks = [selectedDeckCards(), null];
     app.names = [playerName(), `Computer (${CPU_LABEL[level]})`];
     newCpuGame();
     showScreen('game');
@@ -200,7 +200,7 @@
   function newCpuGame() {
     clearTimeout(app.aiTimer);
     Object.assign(app, { aiTimer: null, aiTurn: null, aiMoves: 0 });
-    app.state = E.newGame(app.names);
+    app.state = E.newGame(app.names, app.decks);
     E.applyAction(app.state, AI_PLAYER, AI.chooseAction(app.state, AI_PLAYER, app.cpuLevel)); // the computer redraws first
   }
 
@@ -516,12 +516,165 @@
     newEvents(v, rects, silent);
   }
 
+  // ============================================================ deck builder
+  // Decks live in DeckStore. Its methods are async on purpose: the localStorage implementation
+  // can later be replaced by Firebase without touching the UI code below.
+  const DECK_KEY = 'pof-decks-v1';
+  const DeckStore = {
+    _read() {
+      try {
+        const d = JSON.parse(localStorage.getItem(DECK_KEY));
+        if (d && Array.isArray(d.decks)) return { decks: d.decks.filter(x => x && x.id && E.validDeck(x.cards)), selected: d.selected || null };
+      } catch (e) { /* no storage, or corrupt data */ }
+      return { decks: [], selected: null };
+    },
+    _write(d) {
+      try { localStorage.setItem(DECK_KEY, JSON.stringify(d)); return true; } catch (e) { return false; }
+    },
+    async list() { return this._read().decks; },
+    async getSelectedId() { return this._read().selected; },
+    async select(id) { const d = this._read(); d.selected = id; this._write(d); },
+    async save(deck) { // { id?, name, cards } -> saved deck, or null if the browser refuses to store it
+      const d = this._read();
+      const rec = { id: deck.id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: deck.name, cards: deck.cards.slice() };
+      const i = d.decks.findIndex(x => x.id === rec.id);
+      if (i >= 0) d.decks[i] = rec; else d.decks.push(rec);
+      return this._write(d) ? rec : null;
+    },
+    async remove(id) {
+      const d = this._read();
+      d.decks = d.decks.filter(x => x.id !== id);
+      if (d.selected === id) d.selected = null;
+      this._write(d);
+    },
+  };
+
+  // in-memory copy used by the lobby: the deck to play with is read synchronously when a game starts
+  let deckCache = { decks: [], selected: null };
+  async function refreshDecks() {
+    deckCache = { decks: await DeckStore.list(), selected: await DeckStore.getSelectedId() };
+    if (!deckCache.decks.some(d => d.id === deckCache.selected)) deckCache.selected = null;
+    const sel = $('deckSelect');
+    sel.innerHTML = '<option value="">Random deck</option>' + deckCache.decks.map(d => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+    sel.value = deckCache.selected || '';
+  }
+  function selectedDeckCards() {
+    const d = deckCache.decks.find(x => x.id === deckCache.selected);
+    return d ? d.cards.slice() : null;
+  }
+
+  const DB_TYPES = [['all', 'All'], [CARD_TYPES.HUMAN, '👤 Humans'], [CARD_TYPES.CREATURE, '🐍 Creatures'], [CARD_TYPES.DEITY, '⚡ Deities']];
+  let deckEd = null; // deck being edited: { id, name, cards: Set, type, q }
+  const avgCost = ids => (ids.length ? ids.reduce((t, id) => t + BY_ID[id].cost, 0) / ids.length : 0);
+
+  async function openDeckList() {
+    deckEd = null;
+    await refreshDecks();
+    const decks = deckCache.decks;
+    openModal(`<h2>My decks</h2>
+      <p class="muted">A deck has exactly ${E.CONFIG.DECK_SIZE} different cards. Decks are saved in this browser only.</p>
+      ${decks.length ? `<ul class="deck-list">${decks.map(d => `<li>
+        <div class="deck-info"><b>${esc(d.name)}</b>${d.id === deckCache.selected ? ' <span class="deck-tag">in use</span>' : ''}
+          <span class="muted"> · avg cost ${avgCost(d.cards).toFixed(1)}</span></div>
+        <button class="btn btn-small" data-deckedit="${esc(d.id)}">Edit</button>
+        <button class="btn btn-small btn-ghost" data-deckdel="${esc(d.id)}" aria-label="Delete ${esc(d.name)}">🗑</button></li>`).join('')}</ul>`
+        : '<p>You have no saved decks yet: games start with a random deck.</p>'}
+      <button class="btn btn-gold" data-action="deckNew">+ New deck</button>`);
+  }
+
+  function deckTile(c) {
+    return `<div class="card db-card" data-dbtoggle="${c.id}" data-name="${esc(c.name.toLowerCase())}" data-type="${esc(c.type)}" role="button" tabindex="0" aria-label="${esc(c.name)}">
+      <img src="${c.image}" alt="${esc(c.name)}" loading="lazy">
+      <span class="db-cost" title="Cost">${c.cost}</span>
+      <button class="db-zoom" data-zoom="${c.id}" aria-label="Read ${esc(c.name)}">🔍</button>
+    </div>`;
+  }
+
+  async function openDeckEditor(id) {
+    const saved = id ? (await DeckStore.list()).find(d => d.id === id) : null;
+    deckEd = { id: saved ? saved.id : null, name: saved ? saved.name : '', cards: new Set(saved ? saved.cards : []), type: 'all', q: '' };
+    openModal(`<h2>${saved ? 'Edit deck' : 'New deck'}</h2>
+      <input id="deckName" type="text" maxlength="24" placeholder="Deck name" autocomplete="off" value="${esc(deckEd.name)}">
+      <div class="deck-bar">
+        <div id="deckCount" class="deck-count"></div>
+        <button class="btn btn-small" data-action="deckFill" title="Complete the deck with random cards">🎲 Fill randomly</button>
+        <button class="btn btn-small btn-ghost" data-action="deckClear">Clear</button>
+      </div>
+      <div class="gallery-filters">${DB_TYPES.map(([k, l]) => `<button class="btn ${k === 'all' ? 'on' : ''}" data-dbfilter="${esc(k)}">${l}</button>`).join('')}
+        <input id="deckSearch" type="text" placeholder="Search…" autocomplete="off" aria-label="Search cards"></div>
+      <p class="muted">Tap a card to add or remove it; 🔍 reads it.</p>
+      <div id="deckGrid" class="deck-grid">${CARDS.map(deckTile).join('')}</div>
+      <div class="deck-actions">
+        <button class="btn btn-ghost" data-action="deckBack">Cancel</button>
+        <button id="deckSaveBtn" class="btn btn-gold" data-action="deckSave">Save deck</button>
+      </div>`);
+    $('deckName').addEventListener('input', () => { deckEd.name = $('deckName').value; });
+    $('deckSearch').addEventListener('input', () => { deckEd.q = $('deckSearch').value.trim().toLowerCase(); applyDeckFilter(); });
+    $('deckGrid').addEventListener('keydown', ev => {
+      if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.dataset.dbtoggle) { ev.preventDefault(); deckToggle(ev.target.dataset.dbtoggle); }
+    });
+    paintDeck();
+  }
+
+  function applyDeckFilter() {
+    document.querySelectorAll('#deckGrid .db-card').forEach(el => {
+      el.hidden = !((deckEd.type === 'all' || el.dataset.type === deckEd.type) && (!deckEd.q || el.dataset.name.includes(deckEd.q)));
+    });
+  }
+  function deckFilter(t) {
+    deckEd.type = t;
+    document.querySelectorAll('.gallery-filters [data-dbfilter]').forEach(b => b.classList.toggle('on', b.dataset.dbfilter === t));
+    applyDeckFilter();
+  }
+
+  // refresh selection marks, counter and the Save button without re-rendering the grid (keeps the scroll position)
+  function paintDeck() {
+    const n = deckEd.cards.size, max = E.CONFIG.DECK_SIZE;
+    document.querySelectorAll('#deckGrid .db-card').forEach(el => el.classList.toggle('selected', deckEd.cards.has(el.dataset.dbtoggle)));
+    const cnt = $('deckCount');
+    cnt.innerHTML = `<b>${n}</b> / ${max} cards${n ? ` · avg cost ${avgCost([...deckEd.cards]).toFixed(1)}` : ''}`;
+    cnt.classList.toggle('full', n === max);
+    $('deckSaveBtn').disabled = n !== max;
+    $('deckSaveBtn').title = n === max ? '' : `Choose exactly ${max} cards`;
+  }
+  function deckToggle(id) {
+    if (!deckEd) return;
+    if (deckEd.cards.has(id)) deckEd.cards.delete(id);
+    else if (deckEd.cards.size >= E.CONFIG.DECK_SIZE) return toast(`The deck is full (${E.CONFIG.DECK_SIZE} cards): remove one first.`);
+    else deckEd.cards.add(id);
+    paintDeck();
+  }
+  function deckFillRandom() {
+    const rest = CARDS.map(c => c.id).filter(id => !deckEd.cards.has(id));
+    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+    rest.slice(0, E.CONFIG.DECK_SIZE - deckEd.cards.size).forEach(id => deckEd.cards.add(id));
+    paintDeck();
+  }
+  function deckClear() { deckEd.cards.clear(); paintDeck(); }
+
+  async function saveEditedDeck() {
+    if (!deckEd || deckEd.cards.size !== E.CONFIG.DECK_SIZE) return;
+    const name = deckEd.name.trim() || 'My deck';
+    const rec = await DeckStore.save({ id: deckEd.id, name, cards: [...deckEd.cards] });
+    if (!rec) return toast('Could not save: this browser blocks local storage.');
+    await DeckStore.select(rec.id); // a freshly saved deck is the one to play with
+    toast(`Deck “${name}” saved.`, 'info');
+    return openDeckList();
+  }
+  async function deleteDeck(id) {
+    const d = deckCache.decks.find(x => x.id === id);
+    if (!d || !confirm(`Delete the deck “${d.name}”?`)) return;
+    await DeckStore.remove(id);
+    return openDeckList();
+  }
+
   // ============================================================ lobby & network
   function startLocal() {
     const n1 = playerName();
     const n2 = prompt('Name of the second player?', 'Player 2') || 'Player 2';
     app.mode = 'local';
-    app.state = E.newGame([n1, n2]);
+    app.decks = [selectedDeckCards(), null]; // the second player gets a random deck
+    app.state = E.newGame([n1, n2], app.decks);
     app.viewer = null;
     showScreen('game');
     sync();
@@ -535,7 +688,7 @@
     $('lobbyWaiting').hidden = false;
     $('hostCode').textContent = code;
     $('lobbyStatus').textContent = 'Connecting to the server…';
-    app.mode = 'host'; app.me = 0; app.names = [name];
+    app.mode = 'host'; app.me = 0; app.names = [name]; app.decks = [selectedDeckCards(), null];
     const peer = new Peer(PEER_PREFIX + code, PEER_OPTIONS);
     app.peer = peer;
     logConn('host', peer);
@@ -551,7 +704,8 @@
       conn.on('data', msg => {
         if (msg.t === 'hello') {
           app.names = [name, String(msg.name || 'Guest').slice(0, 20)];
-          app.state = E.newGame(app.names);
+          app.decks[1] = E.validDeck(msg.deck) ? msg.deck : null; // invalid or missing: random deck
+          app.state = E.newGame(app.names, app.decks);
           showScreen('game');
           sync();
         } else if (msg.t === 'action') hostReceive(msg.a);
@@ -584,7 +738,7 @@
       const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
       app.conn = conn;
       watchConn('guest', conn);
-      conn.on('open', () => { clearTimeout(timeout); conn.send({ t: 'hello', name }); $('lobbyStatus').textContent = 'Connected! Starting…'; });
+      conn.on('open', () => { clearTimeout(timeout); conn.send({ t: 'hello', name, deck: selectedDeckCards() }); $('lobbyStatus').textContent = 'Connected! Starting…'; });
       conn.on('data', msg => {
         if (msg.t === 'state') { showScreen('game'); setView(msg.v); }
         else if (msg.t === 'error') toast(msg.msg);
@@ -1270,7 +1424,7 @@
     if (hn) return stepHand(Number(hn.dataset.handnav));
     const gp = ev.target.closest('[data-gaiapick]');
     if (gp && app.ui.gaia) return toggleGaia(gp);
-    const el = ev.target.closest('[data-action],[data-uid],[data-grave],[data-revealed],[data-react],[data-pick],[data-gravepick],[data-choice],[data-zoom],[data-gallery]');
+    const el = ev.target.closest('[data-action],[data-uid],[data-grave],[data-revealed],[data-react],[data-pick],[data-gravepick],[data-choice],[data-zoom],[data-gallery],[data-dbtoggle],[data-dbfilter],[data-deckedit],[data-deckdel]');
     if (!el) {
       if (ev.target === $('modal') && $('modal').dataset.pending !== 'yes' && !app.ui.target) closeModal();
       return;
@@ -1288,6 +1442,10 @@
     }
     if (el.dataset.zoom !== undefined) return zoomCard(el.dataset.zoom);
     if (el.dataset.gallery !== undefined) return openGallery(el.dataset.gallery);
+    if (el.dataset.dbtoggle !== undefined) return deckToggle(el.dataset.dbtoggle);
+    if (el.dataset.dbfilter !== undefined) return deckFilter(el.dataset.dbfilter);
+    if (el.dataset.deckedit !== undefined) return openDeckEditor(el.dataset.deckedit);
+    if (el.dataset.deckdel !== undefined) return deleteDeck(el.dataset.deckdel);
     if (el.dataset.grave !== undefined) return openGrave(Number(el.dataset.grave));
     if (el.dataset.revealed !== undefined) {
       const h = v.players[Number(el.dataset.revealed)].hand.filter(x => !x.hidden);
@@ -1303,6 +1461,12 @@
         case 'cpu': return startCpu();
         case 'rules': return openRules();
         case 'gallery': return openGallery('all');
+        case 'decks': return openDeckList();
+        case 'deckNew': return openDeckEditor(null);
+        case 'deckSave': return saveEditedDeck();
+        case 'deckBack': return openDeckList();
+        case 'deckFill': return deckFillRandom();
+        case 'deckClear': return deckClear();
         case 'cancel': return leaveGame();
         case 'leave': if (!v || v.phase === 'over' || confirm('Leave this game?')) leaveGame(); return;
         case 'closeModal': closeModal(); if (ui.target) { ui.target = null; render(); } return;
@@ -1340,8 +1504,8 @@
           closeModal(); $('modal').dataset.pending = ''; return dispatch({ type: 'pick', uids: [...ui.pick] });
         }
         case 'rematch': {
-          if (app.mode === 'local') { app.state = E.newGame(app.state.players.map(p => p.name)); app.viewer = null; return sync(); }
-          if (app.mode === 'host') { app.state = E.newGame(app.names); return sync(); }
+          if (app.mode === 'local') { app.state = E.newGame(app.state.players.map(p => p.name), app.decks); app.viewer = null; return sync(); }
+          if (app.mode === 'host') { app.state = E.newGame(app.names, app.decks); return sync(); }
           if (app.mode === 'cpu') { newCpuGame(); return sync(); }
           return;
         }
@@ -1422,6 +1586,8 @@
   });
 
 
+  $('deckSelect').addEventListener('change', async () => { await DeckStore.select($('deckSelect').value || null); refreshDecks(); });
+  refreshDecks();
   $('joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') startJoin(); });
   try { const n = localStorage.getItem('pof-name'); if (n) $('playerName').value = n; } catch (e) { /* ignore */ }
   $('playerName').addEventListener('change', () => { try { localStorage.setItem('pof-name', $('playerName').value.trim()); } catch (e) { /* ignore */ } });

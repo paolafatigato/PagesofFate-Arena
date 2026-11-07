@@ -21,6 +21,12 @@
       <label class="field-label" for="playerName">Your name</label>
       <input id="playerName" type="text" maxlength="20" placeholder="e.g. Ariadne" autocomplete="off">
 
+      <label class="field-label" for="deckSelect">Your deck</label>
+      <div class="cpu-row deck-row">
+        <select id="deckSelect" aria-label="Deck to play with"></select>
+        <button class="btn btn-small" data-action="decks">Build decks</button>
+      </div>
+
       <div id="lobbyChoices">
         <button class="btn btn-gold" data-action="host">Create online game</button>
         <div class="join-row">

@@ -16,7 +16,7 @@
  *  - Each player has 20 Life points. You can attack the opponent directly only when their field is empty.
  *  - A card cannot attack on the turn it is played (unless its text says so).
  *  - Abilities without a usage limit can be used once per turn.
- *  - Deck: 30 random cards from the 79-card collection.
+ *  - Deck: 30 different cards from the 79-card collection (random, or built by the player).
  */
 (function (global) {
   'use strict';
@@ -1012,14 +1012,22 @@
   }
 
   // ---------------------------------------------------------------- game setup
-  function newGame(names) {
+  // a valid custom deck: exactly DECK_SIZE different cards, all existing
+  function validDeck(ids) {
+    return Array.isArray(ids) && ids.length === CONFIG.DECK_SIZE
+      && new Set(ids).size === ids.length && ids.every(id => typeof id === 'string' && BY_ID[id]);
+  }
+
+  // decks: optional [idsPlayer0, idsPlayer1]; a missing or invalid deck is replaced by a random one
+  function newGame(names, decks) {
     const s = {
       v: 1, nextUid: 1, turn: 0, current: 0, first: Math.random() < 0.5 ? 0 : 1,
       phase: 'mulligan', pending: null, winner: null, lastAbility: null, log: [], fx: [], fxSeq: 0,
       players: names.map(n => ({ name: n, life: CONFIG.LIFE, coins: 0, deck: [], hand: [], field: [], grave: [], effects: [], usedGame: {}, mulliganDone: false })),
     };
     s.players.forEach((pl, p) => {
-      pl.deck = shuffle(CARDS.map(c => c.id)).slice(0, CONFIG.DECK_SIZE);
+      const custom = decks && decks[p];
+      pl.deck = validDeck(custom) ? shuffle(custom.slice()) : shuffle(CARDS.map(c => c.id)).slice(0, CONFIG.DECK_SIZE);
       for (let k = 0; k < CONFIG.START_HAND; k++) pl.hand.push(makeInst(s, pl.deck.pop(), p));
     });
     log(s, `New game: ${names[0]} vs ${names[1]}. Each player may redraw once.`);
@@ -1321,7 +1329,7 @@
   }
 
   global.Engine = {
-    CONFIG, BY_ID, ABILITIES, coinsForTurn, newGame, applyAction, viewFor, actingPlayer,
+    CONFIG, BY_ID, ABILITIES, coinsForTurn, newGame, validDeck, applyAction, viewFor, actingPlayer,
     getAtk, getDef, costOf, whyCannotUse, whyCannotAttack, attackTargets, canAttackPlayer,
     candidates, onPlaySpec, whyNoOnPlay, abilityKey, isReady, findField, hasStatus, cannotDie, playerEffect, opp,
   };
